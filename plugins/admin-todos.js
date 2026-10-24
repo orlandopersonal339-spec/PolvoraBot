@@ -18,7 +18,8 @@ export default {
     const metadata = await sock.groupMetadata(jid)
     const participants = metadata.participants || []
     const mentions = participants.map(p => p.id)
-    const info = args.join(' ') || 'hola despierten'
+
+    const info = args.join(' ')
 
     const miembros = mentions.map(
       id => `┊» 🌍 @${id.split('@')[0]}`
