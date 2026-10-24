@@ -1,3 +1,4 @@
+
 export default {
     commands: ["noticias"],
     category: "info",
@@ -9,9 +10,9 @@ export default {
 
 *Hola usuarios* 👋
 
-*Actualmente el comando* *.del* *se encuentra temporalmente fuera de servicio ⚙️, nuestro equipo ya está trabajando para solucionarlo lo antes posible.*
+✅ *Les informamos que el comando* *.del* *ya se encuentra nuevamente en funcionamiento.*
 
-🚫 *Así mismo, los comandos* *+18* *han sido deshabilitados temporalmente hasta nuevo aviso.*
+🚫 *Así mismo, los comandos* *+18* *continúan deshabilitados temporalmente hasta nuevo aviso.*
 
 *Agradecemos su paciencia y comprensión* 🙏
 *Estén atentos a próximas actualizaciones* 🚀`;
