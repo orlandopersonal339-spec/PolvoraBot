@@ -46,7 +46,7 @@ export default {
       // latency measured in ms
       const latencyMs = Number(process.hrtime.bigint() - t0) / 1e6
 
-      const texto = `🚩 *${botName}*
+      const texto = `🚩 *${SonicBot}*
 🚀 *Velocidad:*
 → ${latencyMs.toFixed(4)} ms
 
