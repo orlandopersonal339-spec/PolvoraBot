@@ -1,13 +1,10 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-const DATA_DIR = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'carparking-accounts.json');
+import fs from 'fs';
+import path from 'path';
 
 const OWNER_JID = '190886046613743@lid';
+const DB_DIR = path.join(process.cwd(), 'data');
+const DB_FILE = path.join(DB_DIR, 'carparking-accounts.json');
 
 let cola = Promise.resolve();
 
@@ -17,358 +14,271 @@ function conBloqueo(fn) {
   return tarea;
 }
 
-function normalizarJid(jid) {
-  return String(jid || '').trim().split(':')[0];
-}
+function leerDB() {
+  fs.mkdirSync(DB_DIR, { recursive: true });
 
-function obtenerTexto(msg) {
-  let m = msg?.message || {};
-
-  for (let i = 0; i < 5; i++) {
-    if (m.ephemeralMessage?.message) {
-      m = m.ephemeralMessage.message;
-    } else if (m.viewOnceMessage?.message) {
-      m = m.viewOnceMessage.message;
-    } else if (m.viewOnceMessageV2?.message) {
-      m = m.viewOnceMessageV2.message;
-    } else {
-      break;
-    }
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(
+      DB_FILE,
+      JSON.stringify({ disponibles: [], entregadas: [] }, null, 2)
+    );
   }
 
+  try {
+    const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+
+    return {
+      disponibles: Array.isArray(db.disponibles) ? db.disponibles : [],
+      entregadas: Array.isArray(db.entregadas) ? db.entregadas : []
+    };
+  } catch {
+    throw new Error('El archivo de cuentas está dañado. Revisa data/carparking-accounts.json.');
+  }
+}
+
+function guardarDB(db) {
+  fs.mkdirSync(DB_DIR, { recursive: true });
+
+  const temporal = `${DB_FILE}.tmp`;
+  fs.writeFileSync(temporal, JSON.stringify(db, null, 2));
+  fs.renameSync(temporal, DB_FILE);
+}
+
+function normalizarJid(jid = '') {
+  return String(jid).trim().replace(/:\d+@/, '@');
+}
+
+function obtenerRemitente(msg, ctx) {
   return (
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    ''
-  ).trim();
-}
-
-function obtenerJidUsuario(msg, ctx) {
-  const remoto = msg?.key?.remoteJid || '';
-  const participante =
+    ctx?.sender ||
     msg?.key?.participant ||
-    msg?.key?.participantPn ||
-    '';
-
-  if (remoto.endsWith('@g.us')) {
-    return participante || ctx?.sender || '';
-  }
-
-  return ctx?.sender || remoto;
+    msg?.participant ||
+    msg?.key?.remoteJid ||
+    ''
+  );
 }
 
 function esPropietario(msg, ctx) {
-  const remoto = msg?.key?.remoteJid || '';
-  const participante =
-    msg?.key?.participant ||
-    msg?.key?.participantPn ||
-    '';
-
-  const identificadores = [
+  const posibles = [
     ctx?.sender,
-    participante,
-    remoto.endsWith('@g.us') ? '' : remoto
-  ];
+    msg?.key?.participant,
+    msg?.participant,
+    msg?.key?.remoteJid
+  ].filter(Boolean);
 
-  return identificadores.some(
-    jid => normalizarJid(jid) === OWNER_JID
+  return posibles.some(
+    jid => normalizarJid(jid) === normalizarJid(OWNER_JID)
   );
 }
 
-function obtenerComando(msg, ctx) {
-  const conocido =
-    ctx?.command ||
-    ctx?.commandName ||
-    ctx?.cmd;
-
-  if (conocido) {
-    return String(conocido)
-      .replace(/^[.!/#]/, '')
-      .toLowerCase();
-  }
-
-  const texto = obtenerTexto(msg);
+function obtenerTexto(msg, args) {
+  if (Array.isArray(args) && args.length) return args.join(' ');
 
   return (
-    texto.match(/^[.!/#]?([^\s]+)/)?.[1] || ''
-  ).toLowerCase();
+    msg?.message?.conversation ||
+    msg?.message?.extendedTextMessage?.text ||
+    msg?.text ||
+    ''
+  );
 }
 
-function obtenerArgumentos(msg, args, ctx) {
-  const texto = obtenerTexto(msg);
+function obtenerChatPrivado(msg, ctx) {
+  const jid = msg?.key?.participant || ctx?.sender;
 
-  // Priorizar el mensaje original para conservar todas las líneas.
-  if (texto && /(?:^|\n)\s*(?:Gmail|Pass)\s*:?\s*/im.test(texto)) {
-    return texto.replace(/^[.!/#]?\S+[ \t]*/, '').trim();
-  }
+  if (jid && jid.endsWith('@s.whatsapp.net')) return jid;
 
-  if (Array.isArray(args) && args.length) {
-    return args.join(' ').trim();
-  }
-
-  if (Array.isArray(ctx?.args) && ctx.args.length) {
-    return ctx.args.join(' ').trim();
-  }
-
-  return texto.replace(/^[.!/#]?\S+[ \t]*/, '').trim();
+  return '';
 }
 
-async function guardarDatos(datos) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+function extraerCredenciales(texto) {
+  const limpio = String(texto)
+    .replace(/^[.!/]\w+\s*/, '')
+    .trim();
 
-  const temporal = DATA_FILE + '.tmp';
-
-  await fs.writeFile(
-    temporal,
-    JSON.stringify(datos, null, 2),
-    { encoding: 'utf8', mode: 0o600 }
+  const coincidencia = limpio.match(
+    /^(?:gmail\s*:\s*)?([^\s]+@[^ \s]+)\s+(.+)$/i
   );
 
-  await fs.rename(temporal, DATA_FILE);
+  if (!coincidencia) return null;
 
-  try {
-    await fs.chmod(DATA_FILE, 0o600);
-  } catch {}
-}
+  const correo = coincidencia[1].trim();
+  const contrasena = coincidencia[2].trim();
 
-async function prepararArchivo() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-
-  try {
-    await fs.access(DATA_FILE);
-  } catch {
-    await guardarDatos({
-      disponibles: [],
-      entregadas: []
-    });
-  }
-}
-
-async function leerDatos() {
-  await prepararArchivo();
-
-  const contenido = await fs.readFile(DATA_FILE, 'utf8');
-  const datos = JSON.parse(contenido);
-
-  if (
-    !Array.isArray(datos.disponibles) ||
-    !Array.isArray(datos.entregadas)
-  ) {
-    throw new Error('Formato inválido en el archivo de cuentas.');
-  }
-
-  return datos;
-}
-
-async function responder(sock, jid, texto) {
-  return sock.sendMessage(jid, { text: texto });
-}
-
-function extraerCuenta(texto) {
-  const gmailMatch = texto.match(
-    /^[ \t]*Gmail[ \t]*:?[ \t]*(.*?)[ \t]*$/im
-  );
-
-  const passMatch = texto.match(
-    /^[ \t]*Pass[ \t]*:?[ \t]*(.*?)[ \t]*$/im
-  );
-
-  if (!gmailMatch || !passMatch) return null;
-
-  const correo = gmailMatch[1].trim();
-  const contrasena = passMatch[1].trim();
-
-  if (!correo || !contrasena) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return null;
+  if (!contrasena) return null;
 
   return { correo, contrasena };
 }
 
 export default {
-  commands: ['cuenta', 'agg', 'stockcuentas'],
-  category: 'owner',
-  admin: false,
+  commands: ['agg', 'cuenta', 'stockcuentas'],
+  category: 'carparking',
 
-  async run(sock, msg, args, ctx = {}) {
-    const remoto = msg?.key?.remoteJid || '';
-    const esGrupo = remoto.endsWith('@g.us');
+  async run(sock, msg, args, ctx) {
+    const texto = obtenerTexto(msg, args).trim();
+    const comando = String(
+      ctx?.command ||
+      texto.split(/\s+/)[0]?.replace(/^[.!/]/, '') ||
+      ''
+    ).toLowerCase();
 
-    const usuario = obtenerJidUsuario(msg, ctx);
-    const comando = obtenerComando(msg, ctx);
-    const argumentos = obtenerArgumentos(msg, args, ctx);
+    const esGrupo = String(msg?.key?.remoteJid || '').endsWith('@g.us');
+    const remitente = obtenerRemitente(msg, ctx);
 
-    if (!usuario || !remoto) return;
-
-    const dueno = esPropietario(msg, ctx);
-
-    // AGREGAR CUENTAS
     if (comando === 'agg') {
-      if (!dueno) {
-        return responder(
-          sock,
-          remoto,
-          '❌ Este comando solo lo puede usar el dueño del bot.'
+      if (!esPropietario(msg, ctx)) {
+        return sock.sendMessage(
+          msg.key.remoteJid,
+          { text: '⛔ Solo el propietario puede agregar cuentas.' },
+          { quoted: msg }
         );
       }
 
-      const cuenta = extraerCuenta(argumentos);
+      const credenciales = extraerCredenciales(texto);
 
-      if (!cuenta) {
-        return responder(
-          sock,
-          remoto,
-          '╭━━━ 🚗 *CAR PARKING* 🚗 ━━━╮\n' +
-          '┃\n' +
-          '┃ ❌ *FORMATO INCORRECTO*\n' +
-          '┃\n' +
-          '┃ Usa este formato:\n' +
-          '┃\n' +
-          '┃ .agg\n' +
-          '┃ Gmail: correo@gmail.com\n' +
-          '┃ Pass: contraseña\n' +
-          '┃\n' +
-          '╰━━━━━━━━━━━━━━━━━━━━╯'
+      if (!credenciales) {
+        return sock.sendMessage(
+          msg.key.remoteJid,
+          {
+            text:
+              '❌ Formato incorrecto.\n\n' +
+              'Usa:\n.agg correo@gmail.com contraseña123'
+          },
+          { quoted: msg }
         );
       }
 
       return conBloqueo(async () => {
-        const datos = await leerDatos();
+        const db = leerDB();
+        const correoNormalizado = credenciales.correo.toLowerCase();
 
-        const existe = [
-          ...datos.disponibles,
-          ...datos.entregadas
-        ].some(
-          item =>
-            item.correo.toLowerCase() ===
-            cuenta.correo.toLowerCase()
+        const existe = [...db.disponibles, ...db.entregadas].some(
+          cuenta => cuenta.correo.toLowerCase() === correoNormalizado
         );
 
         if (existe) {
-          return responder(
-            sock,
-            remoto,
-            '⚠️ Esa cuenta ya está registrada.'
+          return sock.sendMessage(
+            msg.key.remoteJid,
+            { text: '⚠️ Ese correo ya está registrado en el inventario.' },
+            { quoted: msg }
           );
         }
 
-        datos.disponibles.push({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-          correo: cuenta.correo,
-          contrasena: cuenta.contrasena,
-          agregada: new Date().toISOString()
+        db.disponibles.push({
+          correo: credenciales.correo,
+          contrasena: credenciales.contrasena,
+          agregadoEn: new Date().toISOString()
         });
 
-        await guardarDatos(datos);
+        guardarDB(db);
 
-        return responder(
-          sock,
-          remoto,
-          '╭━━━ 🚗 *CAR PARKING* 🚗 ━━━╮\n' +
-          '┃\n' +
-          '┃ ✅ *CUENTA AGREGADA*\n' +
-          '┃\n' +
-          `┃ 📧 Gmail: ${cuenta.correo}\n` +
-          '┃\n' +
-          `┃ 📦 Disponibles: ${datos.disponibles.length}\n` +
-          '┃\n' +
-          '╰━━━━━━━━━━━━━━━━━━━━╯'
+        return sock.sendMessage(
+          msg.key.remoteJid,
+          {
+            text:
+              '✅ *CUENTA AGREGADA*\n\n' +
+              `📧 Correo: ${credenciales.correo}\n` +
+              `🔑 Contraseña: ${credenciales.contrasena}\n\n` +
+              `🚗 Cuentas disponibles: ${db.disponibles.length}`
+          },
+          { quoted: msg }
         );
       });
     }
 
-    // CONSULTAR STOCK
     if (comando === 'stockcuentas') {
-      if (!dueno) {
-        return responder(
-          sock,
-          remoto,
-          '❌ Este comando solo lo puede usar el dueño del bot.'
+      if (!esPropietario(msg, ctx)) {
+        return sock.sendMessage(
+          msg.key.remoteJid,
+          { text: '⛔ Solo el propietario puede consultar el inventario.' },
+          { quoted: msg }
         );
       }
 
-      return conBloqueo(async () => {
-        const datos = await leerDatos();
+      const db = leerDB();
 
-        return responder(
-          sock,
-          remoto,
-          '╭━━━ 📊 *STOCK DE CUENTAS* ━━━╮\n' +
-          '┃\n' +
-          `┃ 🟢 Disponibles: ${datos.disponibles.length}\n` +
-          `┃ 📤 Entregadas: ${datos.entregadas.length}\n` +
-          '┃\n' +
-          '╰━━━━━━━━━━━━━━━━━━━━╯'
-        );
-      });
+      return sock.sendMessage(
+        msg.key.remoteJid,
+        {
+          text:
+            '🚗 *STOCK CAR PARKING*\n\n' +
+            `📦 Disponibles: ${db.disponibles.length}\n` +
+            `📤 Entregadas: ${db.entregadas.length}`
+        },
+        { quoted: msg }
+      );
     }
 
-    // SOLICITAR CUENTA
-    if (comando !== 'cuenta') return;
+    if (comando === 'cuenta') {
+      return conBloqueo(async () => {
+        const db = leerDB();
 
-    return conBloqueo(async () => {
-      const datos = await leerDatos();
+        if (db.disponibles.length === 0) {
+          return sock.sendMessage(
+            msg.key.remoteJid,
+            { text: '❌ No hay cuentas disponibles.' },
+            { quoted: msg }
+          );
+        }
 
-      if (datos.disponibles.length === 0) {
-        return responder(
-          sock,
-          remoto,
-          '❌ No hay cuentas disponibles'
-        );
-      }
+        const cuenta = db.disponibles[0];
 
-      const destinoPrivado = usuario;
+        // En grupos, se intenta enviar la cuenta al solicitante por privado.
+        const privado = esGrupo
+          ? obtenerChatPrivado(msg, ctx)
+          : msg.key.remoteJid;
 
-      if (destinoPrivado.endsWith('@g.us')) {
-        return responder(
-          sock,
-          remoto,
-          '❌ No pude identificar tu chat privado.'
-        );
-      }
+        if (!privado || privado.endsWith('@g.us')) {
+          return sock.sendMessage(
+            msg.key.remoteJid,
+            {
+              text:
+                '⚠️ No pude identificar tu chat privado. ' +
+                'Escribe al bot por privado y vuelve a usar .cuenta.'
+            },
+            { quoted: msg }
+          );
+        }
 
-      const cuenta = datos.disponibles[0];
+        try {
+          await sock.sendMessage(privado, {
+            text:
+              '🚗 *CUENTA CAR PARKING*\n\n' +
+              `📧 Correo: ${cuenta.correo}\n` +
+              `🔑 Contraseña: ${cuenta.contrasena}\n\n` +
+              '⚠️ Guarda tus datos de acceso.'
+          });
+        } catch {
+          return sock.sendMessage(
+            msg.key.remoteJid,
+            {
+              text:
+                '❌ No pude enviarte la cuenta por privado. ' +
+                'Abre un chat con el bot y vuelve a intentarlo.'
+            },
+            { quoted: msg }
+          );
+        }
 
-      // Guardar la entrega antes de enviar evita duplicados.
-      datos.disponibles.shift();
-
-      datos.entregadas.push({
-        ...cuenta,
-        entregadaA: destinoPrivado,
-        fechaEntrega: new Date().toISOString()
-      });
-
-      await guardarDatos(datos);
-
-      try {
-        await sock.sendMessage(destinoPrivado, {
-          text:
-            '╭━━━ 🚗 *CAR PARKING* 🚗 ━━━╮\n' +
-            '┃\n' +
-            '┃ 🎉 *TU CUENTA*\n' +
-            '┃\n' +
-            `┃ 📧 Gmail: ${cuenta.correo}\n` +
-            `┃ 🔐 Pass: ${cuenta.contrasena}\n` +
-            '┃\n' +
-            '╰━━━━━━━━━━━━━━━━━━━━╯'
+        db.disponibles.shift();
+        db.entregadas.push({
+          ...cuenta,
+          entregadaA: remitente,
+          entregadaEn: new Date().toISOString()
         });
+
+        guardarDB(db);
 
         if (esGrupo) {
-          return responder(
-            sock,
-            remoto,
-            '📩 Revisa tu chat privado.'
+          await sock.sendMessage(
+            msg.key.remoteJid,
+            { text: '✅ Te envié la cuenta por privado.' },
+            { quoted: msg }
           );
         }
-      } catch (error) {
-        console.error('[CARPARKING] Error de envío:', error);
 
-        return responder(
-          sock,
-          remoto,
-          '⚠️ No se pudo confirmar el envío privado. Contacta al administrador.'
-        );
-      }
-    });
+        return;
+      });
+    }
   }
 };
