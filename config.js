@@ -1,6 +1,5 @@
-
 export default {
-  // 👑 OWNERS DEL BOT
+  // 👑 OWNERS DEL BOT (puedes poner los que quieras)
   owners: [
     "5212731307252",
     "5212731307252",
@@ -9,7 +8,6 @@ export default {
     "5212731307252",
     "190886046613743",
     "261770019094711",
-    "190886046613743@lid"
   ],
 
   prefix: ".",
