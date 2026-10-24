@@ -1,8 +1,17 @@
 
 import fs from 'fs';
 import path from 'path';
+import config from '../config.js';
 
-const OWNER_JID = '190886046613743@lid';
+const OWNER_IDS = [
+  '190886046613743@lid',
+  ...(config.owners || []).map(numero =>
+    String(numero).includes('@')
+      ? String(numero)
+      : `${String(numero).replace(/\D/g, '')}@s.whatsapp.net`
+  )
+];
+
 const DB_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DB_DIR, 'premium-users.json');
 
@@ -16,6 +25,33 @@ function conBloqueo(fn) {
 
 function normalizarJid(jid = '') {
   return String(jid).trim().replace(/:\d+@/, '@');
+}
+
+function obtenerJids(msg, ctx) {
+  const remoto = msg?.key?.remoteJid;
+
+  return [
+    ctx?.sender,
+    ctx?.participant,
+    ctx?.senderPn,
+    ctx?.jid,
+    msg?.key?.participant,
+    msg?.key?.participantAlt,
+    msg?.key?.participantPn,
+    msg?.participant,
+    ...(remoto && !remoto.endsWith('@g.us') ? [remoto] : [])
+  ]
+    .filter(jid => typeof jid === 'string' && jid.length > 0)
+    .map(normalizarJid);
+}
+
+function esPropietario(msg, ctx) {
+  const propietarios = OWNER_IDS.map(normalizarJid);
+  return obtenerJids(msg, ctx).some(jid => propietarios.includes(jid));
+}
+
+function obtenerRemitente(msg, ctx) {
+  return obtenerJids(msg, ctx)[0] || '';
 }
 
 function leerDB() {
@@ -43,39 +79,6 @@ function guardarDB(db) {
   fs.renameSync(temporal, DB_FILE);
 }
 
-function obtenerJids(msg, ctx) {
-  return [
-    ctx?.sender,
-    ctx?.participant,
-    ctx?.senderPn,
-    msg?.key?.participant,
-    msg?.key?.participantAlt,
-    msg?.key?.participantPn,
-    msg?.participant,
-    msg?.key?.remoteJid
-  ].filter(jid => typeof jid === 'string' && jid.length > 0);
-}
-
-function esPropietario(msg, ctx) {
-  const owner = normalizarJid(OWNER_JID);
-
-  return obtenerJids(msg, ctx).some(
-    jid => normalizarJid(jid) === owner
-  );
-}
-
-function obtenerRemitente(msg, ctx) {
-  return (
-    msg?.key?.participantAlt ||
-    msg?.key?.participantPn ||
-    msg?.key?.participant ||
-    ctx?.senderPn ||
-    ctx?.sender ||
-    msg?.key?.remoteJid ||
-    ''
-  );
-}
-
 function obtenerTexto(msg, args) {
   if (Array.isArray(args) && args.length) {
     return args.join(' ');
@@ -91,7 +94,6 @@ function obtenerTexto(msg, args) {
 
 function obtenerMenciones(msg) {
   const mensaje = msg?.message || {};
-
   const contexto =
     mensaje.extendedTextMessage?.contextInfo ||
     mensaje.imageMessage?.contextInfo ||
@@ -106,39 +108,21 @@ function obtenerMenciones(msg) {
 
 function obtenerObjetivo(msg, texto, args) {
   const menciones = obtenerMenciones(msg);
-
-  if (menciones.length > 0) {
-    return menciones[0];
-  }
+  if (menciones.length) return menciones[0];
 
   const partes = String(texto).trim().split(/\s+/);
 
-  // Admite un JID escrito directamente.
   const jid = partes.find(p =>
     /@(s\.whatsapp\.net|lid)$/i.test(p)
   );
-
   if (jid) return jid;
 
-  // Admite un número de teléfono internacional.
-  const numero = partes.find(p =>
-    /^\+?\d{8,15}$/.test(p)
+  const numero = [...partes, ...(args || [])].find(p =>
+    /^\+?\d{8,15}$/.test(String(p))
   );
 
   if (numero) {
-    return numero.replace(/\D/g, '') + '@s.whatsapp.net';
-  }
-
-  // Algunos cargadores proporcionan los argumentos por separado.
-  if (Array.isArray(args)) {
-    const valor = args.find(p =>
-      typeof p === 'string' &&
-      /^\+?\d{8,15}$/.test(p)
-    );
-
-    if (valor) {
-      return valor.replace(/\D/g, '') + '@s.whatsapp.net';
-    }
+    return String(numero).replace(/\D/g, '') + '@s.whatsapp.net';
   }
 
   return '';
@@ -146,21 +130,17 @@ function obtenerObjetivo(msg, texto, args) {
 
 function obtenerDuracion(texto, args) {
   const partes = String(texto).trim().split(/\s+/);
-  const duracion = [...partes, ...(args || [])].find(p =>
+  const valor = [...partes, ...(args || [])].find(p =>
     /^\d+[dhm]$/i.test(String(p))
   );
 
-  if (!duracion) {
-    return 30 * 24 * 60 * 60 * 1000;
-  }
+  if (!valor) return 30 * 24 * 60 * 60 * 1000;
 
-  const coincidencia = String(duracion).match(/^(\d+)([dhm])$/i);
+  const coincidencia = String(valor).match(/^(\d+)([dhm])$/i);
   const cantidad = Number(coincidencia[1]);
   const unidad = coincidencia[2].toLowerCase();
 
-  if (!Number.isSafeInteger(cantidad) || cantidad < 1) {
-    return 0;
-  }
+  if (!Number.isSafeInteger(cantidad) || cantidad < 1) return 0;
 
   const multiplicadores = {
     d: 24 * 60 * 60 * 1000,
@@ -171,19 +151,28 @@ function obtenerDuracion(texto, args) {
   return cantidad * multiplicadores[unidad];
 }
 
-function buscarPremium(db, jid) {
-  const objetivo = normalizarJid(jid);
+function obtenerExpiracion(usuario) {
+  const valor = usuario?.expiresAt;
+  if (valor == null) return NaN;
 
-  return db.users.find(
-    usuario => normalizarJid(usuario.jid) === objetivo
-  );
+  if (typeof valor === 'number') return valor;
+
+  const texto = String(valor).trim();
+
+  if (/^\d+$/.test(texto)) return Number(texto);
+
+  return Date.parse(texto);
 }
 
 function estaActivo(usuario) {
-  return Boolean(
-    usuario &&
-    Number.isFinite(Date.parse(usuario.expiresAt)) &&
-    Date.parse(usuario.expiresAt) > Date.now()
+  const expiracion = obtenerExpiracion(usuario);
+  return Number.isFinite(expiracion) && expiracion > Date.now();
+}
+
+function buscarPremium(db, jid) {
+  const objetivo = normalizarJid(jid);
+  return db.users.find(usuario =>
+    normalizarJid(usuario?.jid || '') === objetivo
   );
 }
 
@@ -208,51 +197,36 @@ export default {
     if (!chat) return;
 
     const texto = obtenerTexto(msg, args).trim();
-
     const comando = String(
       ctx?.command ||
       texto.split(/\s+/)[0]?.replace(/^[.!/]/, '') ||
       ''
     ).toLowerCase();
 
-    const remitente = obtenerRemitente(msg, ctx);
     const propietario = esPropietario(msg, ctx);
+    const remitente = obtenerRemitente(msg, ctx);
 
-    // AGREGAR PREMIUM: SOLO EL CREADOR
     if (comando === 'addprem') {
       if (!propietario) {
-        return sock.sendMessage(
-          chat,
-          { text: '⛔ Solo el creador puede dar Premium.' },
-          { quoted: msg }
-        );
+        return sock.sendMessage(chat, {
+          text: '⛔ Solo el creador puede dar Premium.'
+        }, { quoted: msg });
       }
 
       const objetivo = obtenerObjetivo(msg, texto, args);
-
       if (!objetivo) {
-        return sock.sendMessage(
-          chat,
-          {
-            text:
-              '❌ Debes mencionar al usuario o escribir su número.\n\n' +
-              'Ejemplos:\n' +
-              '.addprem @usuario 30d\n' +
-              '.addprem 5212345678901 7d\n\n' +
-              'Si no indicas duración, se asignan 30 días.'
-          },
-          { quoted: msg }
-        );
+        return sock.sendMessage(chat, {
+          text:
+            '❌ Menciona al usuario o escribe su número.\n\n' +
+            'Ejemplos:\n.addprem 5212345678901 30d\n.addprem 5212345678901 7d'
+        }, { quoted: msg });
       }
 
       const duracion = obtenerDuracion(texto, args);
-
       if (!duracion) {
-        return sock.sendMessage(
-          chat,
-          { text: '❌ Duración no válida. Ejemplos: 30d, 12h o 60m.' },
-          { quoted: msg }
-        );
+        return sock.sendMessage(chat, {
+          text: '❌ Duración no válida. Usa 30d, 12h o 60m.'
+        }, { quoted: msg });
       }
 
       return conBloqueo(async () => {
@@ -261,18 +235,22 @@ export default {
 
         const jid = normalizarJid(objetivo);
         const existente = buscarPremium(db, jid);
-
         const ahora = Date.now();
-        const base = existente
-          ? Math.max(ahora, Date.parse(existente.expiresAt))
+        const expiracionAnterior = existente
+          ? obtenerExpiracion(existente)
           : ahora;
+
+        const base = Math.max(
+          ahora,
+          Number.isFinite(expiracionAnterior) ? expiracionAnterior : ahora
+        );
 
         const expiresAt = new Date(base + duracion).toISOString();
 
         if (existente) {
           existente.expiresAt = expiresAt;
-          existente.addedBy = remitente;
           existente.updatedAt = new Date().toISOString();
+          existente.addedBy = remitente;
         } else {
           db.users.push({
             jid,
@@ -284,38 +262,28 @@ export default {
 
         guardarDB(db);
 
-        return sock.sendMessage(
-          chat,
-          {
-            text:
-              '💎 *PREMIUM ACTIVADO*\n\n' +
-              `👤 Usuario: ${jid}\n` +
-              `⏳ Duración agregada: ${Math.floor(duracion / 60000)} minutos\n` +
-              `📅 Vence: ${formatoFecha(expiresAt)}`
-          },
-          { quoted: msg }
-        );
+        return sock.sendMessage(chat, {
+          text:
+            '💎 *PREMIUM ACTIVADO*\n\n' +
+            `👤 Usuario: ${jid}\n` +
+            `⏳ Duración: ${Math.floor(duracion / 60000)} minutos\n` +
+            `📅 Vence: ${formatoFecha(expiresAt)}`
+        }, { quoted: msg });
       });
     }
 
-    // QUITAR PREMIUM: SOLO EL CREADOR
     if (comando === 'delprem') {
       if (!propietario) {
-        return sock.sendMessage(
-          chat,
-          { text: '⛔ Solo el creador puede quitar Premium.' },
-          { quoted: msg }
-        );
+        return sock.sendMessage(chat, {
+          text: '⛔ Solo el creador puede quitar Premium.'
+        }, { quoted: msg });
       }
 
       const objetivo = obtenerObjetivo(msg, texto, args);
-
       if (!objetivo) {
-        return sock.sendMessage(
-          chat,
-          { text: '❌ Menciona al usuario o escribe su número.\nEjemplo: .delprem @usuario' },
-          { quoted: msg }
-        );
+        return sock.sendMessage(chat, {
+          text: '❌ Escribe el número o menciona al usuario.'
+        }, { quoted: msg });
       }
 
       return conBloqueo(async () => {
@@ -324,62 +292,45 @@ export default {
         const antes = db.users.length;
 
         db.users = db.users.filter(
-          usuario => normalizarJid(usuario.jid) !== jid
+          usuario => normalizarJid(usuario?.jid || '') !== jid
         );
 
         guardarDB(db);
 
-        return sock.sendMessage(
-          chat,
-          {
-            text: antes === db.users.length
-              ? '⚠️ Ese usuario no estaba en la lista Premium.'
-              : `✅ Se eliminó Premium de ${jid}.`
-          },
-          { quoted: msg }
-        );
+        return sock.sendMessage(chat, {
+          text: antes === db.users.length
+            ? '⚠️ Ese usuario no estaba en la lista Premium.'
+            : `✅ Se eliminó Premium de ${jid}.`
+        }, { quoted: msg });
       });
     }
 
-    // LISTAR PREMIUM ACTIVOS: SOLO EL CREADOR
     if (comando === 'listaprem') {
       if (!propietario) {
-        return sock.sendMessage(
-          chat,
-          { text: '⛔ Solo el creador puede consultar la lista Premium.' },
-          { quoted: msg }
-        );
+        return sock.sendMessage(chat, {
+          text: '⛔ Solo el creador puede consultar la lista Premium.'
+        }, { quoted: msg });
       }
 
       const db = leerDB();
       limpiarExpirados(db);
       guardarDB(db);
 
-      if (db.users.length === 0) {
-        return sock.sendMessage(
-          chat,
-          { text: '💎 No hay usuarios Premium activos.' },
-          { quoted: msg }
-        );
+      if (!db.users.length) {
+        return sock.sendMessage(chat, {
+          text: '💎 No hay usuarios Premium activos.'
+        }, { quoted: msg });
       }
 
       const lista = db.users.map((usuario, i) =>
-        `${i + 1}. ${usuario.jid}\n   📅 Vence: ${formatoFecha(usuario.expiresAt)}`
+        `${i + 1}. ${usuario.jid}\n   📅 Vence: ${formatoFecha(obtenerExpiracion(usuario))}`
       ).join('\n\n');
 
-      return sock.sendMessage(
-        chat,
-        {
-          text:
-            '💎 *USUARIOS PREMIUM ACTIVOS*\n\n' +
-            `${lista}\n\n` +
-            `👥 Total: ${db.users.length}`
-        },
-        { quoted: msg }
-      );
+      return sock.sendMessage(chat, {
+        text: `💎 *USUARIOS PREMIUM ACTIVOS*\n\n${lista}\n\n👥 Total: ${db.users.length}`
+      }, { quoted: msg });
     }
 
-    // CONSULTAR ESTADO PREMIUM
     if (comando === 'prem') {
       const db = leerDB();
       limpiarExpirados(db);
@@ -392,27 +343,20 @@ export default {
       const usuario = buscarPremium(db, objetivo);
 
       if (!estaActivo(usuario)) {
-        return sock.sendMessage(
-          chat,
-          {
-            text:
-              '❌ *NO TIENES PREMIUM ACTIVO*\n\n' +
-              'Contacta al creador del bot para obtener acceso.'
-          },
-          { quoted: msg }
-        );
+        return sock.sendMessage(chat, {
+          text:
+            propietario
+              ? '👑 Eres el creador del bot. No necesitas Premium para administrar el bot.'
+              : '❌ *NO TIENES PREMIUM ACTIVO*\n\nContacta al creador del bot para obtener acceso.'
+        }, { quoted: msg });
       }
 
-      return sock.sendMessage(
-        chat,
-        {
-          text:
-            '💎 *PREMIUM ACTIVO*\n\n' +
-            `👤 Usuario: ${usuario.jid}\n` +
-            `📅 Vence: ${formatoFecha(usuario.expiresAt)}`
-        },
-        { quoted: msg }
-      );
+      return sock.sendMessage(chat, {
+        text:
+          '💎 *PREMIUM ACTIVO*\n\n' +
+          `👤 Usuario: ${usuario.jid}\n` +
+          `📅 Vence: ${formatoFecha(obtenerExpiracion(usuario))}`
+      }, { quoted: msg });
     }
   }
 };
