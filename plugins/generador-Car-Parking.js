@@ -37,8 +37,9 @@ function obtenerIdentificadores(msg, ctx) {
     msg?.key?.participantAlt,
     msg?.key?.participantPn,
     msg?.participant
-  ].filter(jid => typeof jid === 'string' && jid.length > 0)
-   .map(normalizarJid);
+  ]
+    .filter(jid => typeof jid === 'string' && jid.length > 0)
+    .map(normalizarJid);
 }
 
 function esPropietario(msg, ctx) {
@@ -56,10 +57,7 @@ function esPremium(msg, ctx) {
       fs.readFileSync(PREMIUM_FILE, 'utf8')
     );
 
-    const usuarios = Array.isArray(db.users)
-      ? db.users
-      : [];
-
+    const usuarios = Array.isArray(db.users) ? db.users : [];
     const identificadores = obtenerIdentificadores(msg, ctx);
 
     return usuarios.some(usuario => {
@@ -182,7 +180,7 @@ function extraerCredenciales(texto) {
   };
 }
 
-async function generarAnimacion(sock, chat, msg) {
+async function generarAnimacion(sock, chat, msg, cuentaEnviada) {
   const frames = [
     '▱▱▱▱▱▱▱▱▱▱ 0%',
     '▰▱▱▱▱▱▱▱▱▱ 10%',
@@ -211,11 +209,18 @@ async function generarAnimacion(sock, chat, msg) {
     for (let i = 1; i < frames.length; i++) {
       await esperar(350);
 
+      const finalizado = i === frames.length - 1;
+
       await sock.sendMessage(chat, {
-        text:
-          '🚗 *SONICBOT PRO — CAR PARKING*\n\n' +
-          '⚙️ Generando cuenta...\n\n' +
-          frames[i],
+        text: finalizado
+          ? cuentaEnviada
+            ? '🚗 *SONICBOT PRO — CAR PARKING*\n\n' +
+              '✅ Cuenta enviada por privado.'
+            : '🚗 *SONICBOT PRO — CAR PARKING*\n\n' +
+              '❌ No se pudo enviar la cuenta por privado.'
+          : '🚗 *SONICBOT PRO — CAR PARKING*\n\n' +
+            '⚙️ Generando cuenta...\n\n' +
+            frames[i],
         edit: mensaje.key
       });
     }
@@ -352,9 +357,9 @@ export default {
     // SOLICITAR CUENTA
     if (comando === 'cuenta') {
       return conBloqueo(async () => {
-        const db = leerDB();
+        const inventario = leerDB();
 
-        if (db.disponibles.length === 0) {
+        if (inventario.disponibles.length === 0) {
           return sock.sendMessage(
             chat,
             { text: '❌ No hay cuentas disponibles.' },
@@ -378,20 +383,10 @@ export default {
           );
         }
 
-        await generarAnimacion(sock, chat, msg);
-
-        const inventario = leerDB();
-
-        if (inventario.disponibles.length === 0) {
-          return sock.sendMessage(
-            chat,
-            { text: '❌ No hay cuentas disponibles.' },
-            { quoted: msg }
-          );
-        }
-
         const cuenta = inventario.disponibles[0];
+        let enviada = false;
 
+        // Enviar la cuenta antes de mostrar la confirmación final
         try {
           await sock.sendMessage(privado, {
             text:
@@ -400,36 +395,29 @@ export default {
               `🔑 Contraseña: ${cuenta.contrasena}\n\n` +
               '⚠️ Guarda tus datos de acceso.'
           });
+
+          enviada = true;
         } catch (error) {
           console.error('Error enviando cuenta por privado:', error);
-
-          return sock.sendMessage(
-            chat,
-            {
-              text:
-                '❌ WhatsApp no permitió enviar la cuenta por privado. ' +
-                'No se descontó del inventario.'
-            },
-            { quoted: msg }
-          );
         }
 
-        inventario.disponibles.shift();
+        if (enviada) {
+          inventario.disponibles.shift();
 
-        inventario.entregadas.push({
-          ...cuenta,
-          entregadaA: remitente,
-          entregadaEn: new Date().toISOString()
-        });
+          inventario.entregadas.push({
+            ...cuenta,
+            entregadaA: remitente,
+            entregadaEn: new Date().toISOString()
+          });
 
-        guardarDB(inventario);
+          guardarDB(inventario);
+        }
 
-        if (esGrupo) {
-          await sock.sendMessage(
-            chat,
-            { text: '✅ Cuenta enviada por privado.' },
-            { quoted: msg }
-          );
+        // La confirmación reemplaza la barra en el mismo mensaje
+        await generarAnimacion(sock, chat, msg, enviada);
+
+        if (!enviada) {
+          console.error('La cuenta no se pudo entregar; no se descontó del inventario.');
         }
       });
     }
