@@ -52,8 +52,7 @@ function esPropietario(msg, ctx) {
 }
 
 function obtenerRemitente(msg, ctx) {
-  const ids = obtenerJids(msg, ctx);
-  return ids[0] || '';
+  return obtenerJids(msg, ctx)[0] || '';
 }
 
 function leerDB() {
@@ -165,6 +164,7 @@ function estaActivo(usuario) {
 
 function buscarPremium(db, jid) {
   const objetivo = normalizarJid(jid);
+
   return db.users.find(usuario =>
     normalizarJid(usuario?.jid || '') === objetivo
   );
@@ -180,6 +180,30 @@ function formatoFecha(fecha) {
 
 function limpiarExpirados(db) {
   db.users = db.users.filter(estaActivo);
+}
+
+// Busca un JID para mencionar al usuario sin mostrar su ID en el texto.
+function obtenerJidMencion(msg, ctx, jidGuardado) {
+  const ids = obtenerJids(msg, ctx);
+
+  if (ids.some(jid => normalizarJid(jid) === normalizarJid(jidGuardado))) {
+    return jidGuardado;
+  }
+
+  const alternativo =
+    msg?.key?.participantAlt ||
+    msg?.key?.participantPn ||
+    msg?.key?.participant ||
+    ctx?.senderPn;
+
+  if (
+    typeof alternativo === 'string' &&
+    alternativo.endsWith('@s.whatsapp.net')
+  ) {
+    return alternativo;
+  }
+
+  return jidGuardado;
 }
 
 export default {
@@ -211,9 +235,7 @@ export default {
 
       if (!objetivo) {
         return sock.sendMessage(chat, {
-          text:
-            '❌ Escribe el número o menciona al usuario.\n\n' +
-            'Ejemplo: .addprem 5212345678901 30d'
+          text: '❌ Escribe el número o menciona al usuario.\nEjemplo: .addprem 5212345678901 30d'
         }, { quoted: msg });
       }
 
@@ -262,9 +284,10 @@ export default {
         return sock.sendMessage(chat, {
           text:
             '💎 *PREMIUM ACTIVADO*\n\n' +
-            `👤 Usuario: ${jid}\n` +
-            `⏳ Duración agregada: ${Math.floor(duracion / 60000)} minutos\n` +
-            `📅 Vence: ${formatoFecha(expiresAt)}`
+            `👤 Usuario: @${jid.split('@')[0]}\n` +
+            `⏳ Duración: ${Math.floor(duracion / 60000)} minutos\n` +
+            `📅 Vence: ${formatoFecha(expiresAt)}`,
+          mentions: [jid]
         }, { quoted: msg });
       });
     }
@@ -280,14 +303,14 @@ export default {
 
       if (!objetivo) {
         return sock.sendMessage(chat, {
-          text: '❌ Escribe el número o menciona al usuario.\nEjemplo: .delprem 5212345678901'
+          text: '❌ Escribe el número o menciona al usuario.'
         }, { quoted: msg });
       }
 
       return conBloqueo(async () => {
         const db = leerDB();
         const jid = normalizarJid(objetivo);
-        const cantidadAnterior = db.users.length;
+        const antes = db.users.length;
 
         db.users = db.users.filter(
           usuario => normalizarJid(usuario?.jid || '') !== jid
@@ -296,9 +319,10 @@ export default {
         guardarDB(db);
 
         return sock.sendMessage(chat, {
-          text: cantidadAnterior === db.users.length
+          text: antes === db.users.length
             ? '⚠️ Ese usuario no estaba en la lista Premium.'
-            : `✅ Se eliminó Premium de ${jid}.`
+            : `✅ Se eliminó Premium de @${jid.split('@')[0]}.`,
+          mentions: [jid]
         }, { quoted: msg });
       });
     }
@@ -321,11 +345,12 @@ export default {
       }
 
       const lista = db.users.map((usuario, i) =>
-        `${i + 1}. ${usuario.jid}\n   📅 Vence: ${formatoFecha(obtenerExpiracion(usuario))}`
+        `${i + 1}. @${String(usuario.jid).split('@')[0]}\n   📅 Vence: ${formatoFecha(obtenerExpiracion(usuario))}`
       ).join('\n\n');
 
       return sock.sendMessage(chat, {
-        text: `💎 *USUARIOS PREMIUM ACTIVOS*\n\n${lista}\n\n👥 Total: ${db.users.length}`
+        text: `💎 *USUARIOS PREMIUM ACTIVOS*\n\n${lista}\n\n👥 Total: ${db.users.length}`,
+        mentions: db.users.map(usuario => usuario.jid)
       }, { quoted: msg });
     }
 
@@ -334,24 +359,28 @@ export default {
       limpiarExpirados(db);
       guardarDB(db);
 
-      // Si escribes un usuario, consulta ese usuario.
-      // Si no escribes ninguno, consulta al remitente.
       const objetivo = obtenerObjetivo(msg, texto, args) || remitente;
       const usuario = buscarPremium(db, objetivo);
 
       if (!estaActivo(usuario)) {
+        const jidMencion = obtenerJidMencion(msg, ctx, objetivo);
+
         return sock.sendMessage(chat, {
           text:
             '❌ *EL USUARIO NO TIENE PREMIUM ACTIVO*\n\n' +
-            `👤 Usuario: ${objetivo || 'No identificado'}`
+            `👤 Usuario: @${jidMencion.split('@')[0]}`,
+          mentions: [jidMencion]
         }, { quoted: msg });
       }
+
+      const jidMencion = obtenerJidMencion(msg, ctx, usuario.jid);
 
       return sock.sendMessage(chat, {
         text:
           '💎 *PREMIUM ACTIVO*\n\n' +
-          `👤 Usuario: ${usuario.jid}\n` +
-          `📅 Vence: ${formatoFecha(obtenerExpiracion(usuario))}`
+          `👤 Usuario: @${jidMencion.split('@')[0]}\n` +
+          `📅 Vence: ${formatoFecha(obtenerExpiracion(usuario))}`,
+        mentions: [jidMencion]
       }, { quoted: msg });
     }
   }
