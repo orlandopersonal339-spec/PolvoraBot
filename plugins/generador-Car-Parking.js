@@ -17,6 +17,104 @@ function conBloqueo(fn) {
   return tarea;
 }
 
+function normalizarJid(jid) {
+  return String(jid || '').trim().split(':')[0];
+}
+
+function obtenerTexto(msg) {
+  let m = msg?.message || {};
+
+  for (let i = 0; i < 5; i++) {
+    if (m.ephemeralMessage?.message) {
+      m = m.ephemeralMessage.message;
+    } else if (m.viewOnceMessage?.message) {
+      m = m.viewOnceMessage.message;
+    } else if (m.viewOnceMessageV2?.message) {
+      m = m.viewOnceMessageV2.message;
+    } else {
+      break;
+    }
+  }
+
+  return (
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    ''
+  ).trim();
+}
+
+function obtenerJidUsuario(msg, ctx) {
+  const remoto = msg?.key?.remoteJid || '';
+  const participante =
+    msg?.key?.participant ||
+    msg?.key?.participantPn ||
+    '';
+
+  if (remoto.endsWith('@g.us')) {
+    return participante || ctx?.sender || '';
+  }
+
+  return ctx?.sender || remoto;
+}
+
+function esPropietario(msg, ctx) {
+  const remoto = msg?.key?.remoteJid || '';
+  const participante =
+    msg?.key?.participant ||
+    msg?.key?.participantPn ||
+    '';
+
+  const identificadores = [
+    ctx?.sender,
+    participante,
+    remoto.endsWith('@g.us') ? '' : remoto
+  ];
+
+  return identificadores.some(
+    jid => normalizarJid(jid) === OWNER_JID
+  );
+}
+
+function obtenerComando(msg, ctx) {
+  const conocido =
+    ctx?.command ||
+    ctx?.commandName ||
+    ctx?.cmd;
+
+  if (conocido) {
+    return String(conocido)
+      .replace(/^[.!/#]/, '')
+      .toLowerCase();
+  }
+
+  const texto = obtenerTexto(msg);
+
+  return (
+    texto.match(/^[.!/#]?([^\s]+)/)?.[1] || ''
+  ).toLowerCase();
+}
+
+function obtenerArgumentos(msg, args, ctx) {
+  const texto = obtenerTexto(msg);
+
+  // Priorizar el mensaje original para conservar todas las líneas.
+  if (texto && /(?:^|\n)\s*(?:Gmail|Pass)\s*:?\s*/im.test(texto)) {
+    return texto.replace(/^[.!/#]?\S+[ \t]*/, '').trim();
+  }
+
+  if (Array.isArray(args) && args.length) {
+    return args.join(' ').trim();
+  }
+
+  if (Array.isArray(ctx?.args) && ctx.args.length) {
+    return ctx.args.join(' ').trim();
+  }
+
+  return texto.replace(/^[.!/#]?\S+[ \t]*/, '').trim();
+}
+
 async function guardarDatos(datos) {
   await fs.mkdir(DATA_DIR, { recursive: true });
 
@@ -58,86 +156,37 @@ async function leerDatos() {
     !Array.isArray(datos.disponibles) ||
     !Array.isArray(datos.entregadas)
   ) {
-    throw new Error('El archivo de cuentas tiene un formato inválido.');
+    throw new Error('Formato inválido en el archivo de cuentas.');
   }
 
   return datos;
-}
-
-function obtenerTexto(msg) {
-  const m = msg?.message || {};
-
-  return (
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    ''
-  ).trim();
-}
-
-function obtenerJidUsuario(msg, ctx) {
-  const remoto = msg?.key?.remoteJid || '';
-  const participante =
-    msg?.key?.participant ||
-    msg?.key?.participantPn ||
-    '';
-
-  if (remoto.endsWith('@g.us')) {
-    return participante || ctx?.sender || '';
-  }
-
-  return ctx?.sender || remoto;
-}
-
-function normalizarJid(jid) {
-  return String(jid || '').trim().split(':')[0];
-}
-
-function obtenerComando(msg, ctx) {
-  const conocido =
-    ctx?.command ||
-    ctx?.commandName ||
-    ctx?.cmd;
-
-  if (conocido) {
-    return String(conocido)
-      .replace(/^[.!/#]/, '')
-      .toLowerCase();
-  }
-
-  const texto = obtenerTexto(msg);
-
-  return (
-    texto.match(/^[.!/#]?([^\s]+)/)?.[1] || ''
-  ).toLowerCase();
-}
-
-function obtenerArgumentos(msg, args, ctx) {
-  if (Array.isArray(args) && args.length) {
-    return args.join(' ').trim();
-  }
-
-  if (Array.isArray(ctx?.args) && ctx.args.length) {
-    return ctx.args.join(' ').trim();
-  }
-
-  return obtenerTexto(msg)
-    .replace(/^[.!/#]?\S+\s*/, '')
-    .trim();
 }
 
 async function responder(sock, jid, texto) {
   return sock.sendMessage(jid, { text: texto });
 }
 
-export default {
-  commands: [
-    'cuenta',
-    'agg',
-    'stockcuentas'
-  ],
+function extraerCuenta(texto) {
+  const gmailMatch = texto.match(
+    /^[ \t]*Gmail[ \t]*:?[ \t]*(.*?)[ \t]*$/im
+  );
 
+  const passMatch = texto.match(
+    /^[ \t]*Pass[ \t]*:?[ \t]*(.*?)[ \t]*$/im
+  );
+
+  if (!gmailMatch || !passMatch) return null;
+
+  const correo = gmailMatch[1].trim();
+  const contrasena = passMatch[1].trim();
+
+  if (!correo || !contrasena) return null;
+
+  return { correo, contrasena };
+}
+
+export default {
+  commands: ['cuenta', 'agg', 'stockcuentas'],
   category: 'owner',
   admin: false,
 
@@ -151,16 +200,11 @@ export default {
 
     if (!usuario || !remoto) return;
 
-    const esDueno =
-      normalizarJid(usuario) === normalizarJid(OWNER_JID);
+    const dueno = esPropietario(msg, ctx);
 
-    // AGREGAR CUENTA CON .agg
-    // Formato:
-    // .agg
-    // Gmail: correo@gmail.com
-    // Pass: contraseña
+    // AGREGAR CUENTAS
     if (comando === 'agg') {
-      if (!esDueno) {
+      if (!dueno) {
         return responder(
           sock,
           remoto,
@@ -168,29 +212,23 @@ export default {
         );
       }
 
-      const gmailMatch = argumentos.match(/Gmail:\s*([^\r\n]+)/i);
-      const passMatch = argumentos.match(/Pass:\s*([^\r\n]+)/i);
+      const cuenta = extraerCuenta(argumentos);
 
-      if (!gmailMatch || !passMatch) {
+      if (!cuenta) {
         return responder(
           sock,
           remoto,
-          '❌ *FORMATO INCORRECTO*\n\n' +
-          '📌 Usa este formato:\n\n' +
-          '.agg\n' +
-          'Gmail: correo@gmail.com\n' +
-          'Pass: contraseña'
-        );
-      }
-
-      const correo = gmailMatch[1].trim();
-      const contrasena = passMatch[1].trim();
-
-      if (!correo || !contrasena) {
-        return responder(
-          sock,
-          remoto,
-          '❌ El Gmail y el Pass no pueden estar vacíos.'
+          '╭━━━ 🚗 *CAR PARKING* 🚗 ━━━╮\n' +
+          '┃\n' +
+          '┃ ❌ *FORMATO INCORRECTO*\n' +
+          '┃\n' +
+          '┃ Usa este formato:\n' +
+          '┃\n' +
+          '┃ .agg\n' +
+          '┃ Gmail: correo@gmail.com\n' +
+          '┃ Pass: contraseña\n' +
+          '┃\n' +
+          '╰━━━━━━━━━━━━━━━━━━━━╯'
         );
       }
 
@@ -201,8 +239,9 @@ export default {
           ...datos.disponibles,
           ...datos.entregadas
         ].some(
-          cuenta =>
-            cuenta.correo.toLowerCase() === correo.toLowerCase()
+          item =>
+            item.correo.toLowerCase() ===
+            cuenta.correo.toLowerCase()
         );
 
         if (existe) {
@@ -215,8 +254,8 @@ export default {
 
         datos.disponibles.push({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-          correo,
-          contrasena,
+          correo: cuenta.correo,
+          contrasena: cuenta.contrasena,
           agregada: new Date().toISOString()
         });
 
@@ -229,7 +268,7 @@ export default {
           '┃\n' +
           '┃ ✅ *CUENTA AGREGADA*\n' +
           '┃\n' +
-          `┃ 📧 Gmail: ${correo}\n` +
+          `┃ 📧 Gmail: ${cuenta.correo}\n` +
           '┃\n' +
           `┃ 📦 Disponibles: ${datos.disponibles.length}\n` +
           '┃\n' +
@@ -238,9 +277,9 @@ export default {
       });
     }
 
-    // CONSULTAR INVENTARIO
+    // CONSULTAR STOCK
     if (comando === 'stockcuentas') {
-      if (!esDueno) {
+      if (!dueno) {
         return responder(
           sock,
           remoto,
@@ -290,7 +329,7 @@ export default {
 
       const cuenta = datos.disponibles[0];
 
-      // Registrar la cuenta para impedir duplicados.
+      // Guardar la entrega antes de enviar evita duplicados.
       datos.disponibles.shift();
 
       datos.entregadas.push({
@@ -324,18 +363,10 @@ export default {
       } catch (error) {
         console.error('[CARPARKING] Error de envío:', error);
 
-        if (esGrupo) {
-          return responder(
-            sock,
-            remoto,
-            '⚠️ No se pudo confirmar el envío privado. Contacta al administrador.'
-          );
-        }
-
         return responder(
           sock,
           remoto,
-          '⚠️ No se pudo confirmar el envío. Contacta al administrador.'
+          '⚠️ No se pudo confirmar el envío privado. Contacta al administrador.'
         );
       }
     });
