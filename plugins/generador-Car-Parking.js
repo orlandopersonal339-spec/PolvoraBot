@@ -134,7 +134,7 @@ async function responder(sock, jid, texto) {
 export default {
   commands: [
     'cuenta',
-    'agregarcuenta',
+    'agg',
     'stockcuentas'
   ],
 
@@ -154,8 +154,8 @@ export default {
     const esDueno =
       normalizarJid(usuario) === normalizarJid(OWNER_JID);
 
-    // AGREGAR CUENTAS
-    if (comando === 'agregarcuenta') {
+    // AGREGAR CUENTAS CON .agg
+    if (comando === 'agg') {
       if (!esDueno) {
         return responder(
           sock,
@@ -170,7 +170,7 @@ export default {
         return responder(
           sock,
           remoto,
-          'Formato incorrecto.\n\nUso:\n.agregarcuenta correo@ejemplo.com|contraseña'
+          '❌ Formato incorrecto.\n\nUso:\n.agg correo@ejemplo.com|contraseña'
         );
       }
 
@@ -216,12 +216,12 @@ export default {
         return responder(
           sock,
           remoto,
-          `✅ Cuenta agregada.\n📦 Disponibles: ${datos.disponibles.length}`
+          `✅ Cuenta agregada correctamente.\n📦 Disponibles: ${datos.disponibles.length}`
         );
       });
     }
 
-    // CONSULTAR STOCK
+    // CONSULTAR INVENTARIO CON .stockcuentas
     if (comando === 'stockcuentas') {
       if (!esDueno) {
         return responder(
@@ -244,7 +244,7 @@ export default {
       });
     }
 
-    // SOLICITAR CUENTA DESDE PRIVADO O GRUPO
+    // SOLICITAR CUENTA CON .cuenta
     if (comando !== 'cuenta') return;
 
     return conBloqueo(async () => {
@@ -270,7 +270,7 @@ export default {
 
       const cuenta = datos.disponibles[0];
 
-      // Reservar la cuenta antes del envío para evitar duplicados.
+      // Registrar antes de enviar para evitar duplicados.
       datos.disponibles.shift();
 
       datos.entregadas.push({
@@ -294,7 +294,7 @@ export default {
           return responder(
             sock,
             remoto,
-            '📩 Se procesó tu solicitud. Revisa tu chat privado.'
+            '📩 Revisa tu chat privado; se procesó tu solicitud.'
           );
         }
       } catch (error) {
