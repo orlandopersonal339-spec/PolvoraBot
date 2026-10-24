@@ -1,50 +1,42 @@
+
 export default {
-  commands: ["todos", "tagall"],
-  admin: true,
-  category: "admin",
+  commands: ['todos'],
+  category: 'group',
 
   async run(sock, msg, args, ctx) {
-    const jid = msg.key.remoteJid;
+    const jid = ctx?.jid || msg?.key?.remoteJid
+    if (!jid) return
 
-    if (!ctx.isGroup) {
-      return sock.sendMessage(jid, {
-        text: "❌ Este comando solo funciona en grupos."
-      });
+    if (!jid.endsWith('@g.us')) {
+      return sock.sendMessage(
+        jid,
+        { text: '❌ Este comando solo funciona en grupos.' },
+        { quoted: msg }
+      )
     }
 
-    // ✅ PARTICIPANTES EN TIEMPO REAL (SIN BUG)
-    const participants = ctx.participants || [];
-    if (!participants.length) {
-      return sock.sendMessage(jid, {
-        text: "⚠️ No pude obtener los participantes del grupo."
-      });
-    }
+    const metadata = await sock.groupMetadata(jid)
+    const participants = metadata.participants || []
+    const mentions = participants.map(p => p.id)
+    const info = args.join(' ') || 'hola despierten'
 
-    const groupName = ctx.groupMetadata?.subject || "este grupo";
+    const miembros = mentions.map(
+      id => `┊» 🌍 @${id.split('@')[0]}`
+    ).join('\n')
 
-    // 🔥 UN SOLO EMOJI
-    const emoji = "🔥";
+    const texto = `！ 𝗠𝗘𝗡𝗖𝗜𝗢𝗡 𝗚𝗘𝗡𝗘𝗥𝗔𝗟  ！
+ㅤ 𝗣𝗔𝗥𝗔 ${mentions.length} 𝗠𝗘𝗠𝗕𝗘𝗥𝗦 🤖
 
-    // ✅ MENTIONS LIMPIAS (LID + NUM)
-    const mentions = participants.map(p => p.id);
+» 𝗜𝗡𝗙𝗢: ${info}
 
-    // 🧠 TEXTO PRO
-    const text =
-      `📢 *MENCIÓN GENERAL — ${groupName}*\n\n` +
-      participants.map(p => `${emoji} @${p.id.split("@")[0]}`).join("\n");
+╭ ⊹  .  ⊹
+${miembros}
+╰ㅤㅤㅤ𝗦𝗼𝗻𝗶𝗰𝗕𝗼𝘁 𝗣𝗿𝗼`
 
-    // 📤 ENVIAR MENSAJE
-    await sock.sendMessage(jid, {
-      text,
-      mentions
-    });
-
-    // 🔁 REACCIONAR AL COMANDO .TODOS
-    await sock.sendMessage(jid, {
-      react: {
-        text: "🔥",
-        key: msg.key
-      }
-    });
+    await sock.sendMessage(
+      jid,
+      { text: texto, mentions },
+      { quoted: msg }
+    )
   }
-};
+}
