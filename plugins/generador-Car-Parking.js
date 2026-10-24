@@ -4,14 +4,9 @@ import path from 'path';
 
 const OWNER_JID = '190886046613743@lid';
 
-// Agrega aquí los JID de tus usuarios Premium.
-// Ejemplo: '5212345678901@s.whatsapp.net'
-const PREMIUM_JIDS = [
-  // '5212345678901@s.whatsapp.net',
-];
-
 const DB_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DB_DIR, 'carparking-accounts.json');
+const PREMIUM_FILE = path.join(DB_DIR, 'premium-users.json');
 
 let cola = Promise.resolve();
 
@@ -23,32 +18,6 @@ function conBloqueo(fn) {
 
 function esperar(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function leerDB() {
-  fs.mkdirSync(DB_DIR, { recursive: true });
-
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(
-      DB_FILE,
-      JSON.stringify({ disponibles: [], entregadas: [] }, null, 2)
-    );
-  }
-
-  const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-
-  return {
-    disponibles: Array.isArray(db.disponibles) ? db.disponibles : [],
-    entregadas: Array.isArray(db.entregadas) ? db.entregadas : []
-  };
-}
-
-function guardarDB(db) {
-  fs.mkdirSync(DB_DIR, { recursive: true });
-
-  const temporal = `${DB_FILE}.tmp`;
-  fs.writeFileSync(temporal, JSON.stringify(db, null, 2));
-  fs.renameSync(temporal, DB_FILE);
 }
 
 function normalizarJid(jid = '') {
@@ -77,15 +46,83 @@ function esPropietario(msg, ctx) {
 }
 
 function esPremium(msg, ctx) {
-  const premium = PREMIUM_JIDS.map(normalizarJid);
+  try {
+    if (!fs.existsSync(PREMIUM_FILE)) return false;
 
-  return obtenerIdentificadores(msg, ctx).some(
-    jid => premium.includes(normalizarJid(jid))
-  );
+    const db = JSON.parse(
+      fs.readFileSync(PREMIUM_FILE, 'utf8')
+    );
+
+    const usuarios = Array.isArray(db.users)
+      ? db.users
+      : [];
+
+    const identificadores = obtenerIdentificadores(msg, ctx)
+      .map(normalizarJid);
+
+    return usuarios.some(usuario => {
+      if (!usuario?.jid || !usuario?.expiresAt) {
+        return false;
+      }
+
+      const jidPremium = normalizarJid(usuario.jid);
+      const expiracion = Date.parse(usuario.expiresAt);
+
+      return (
+        identificadores.includes(jidPremium) &&
+        Number.isFinite(expiracion) &&
+        expiracion > Date.now()
+      );
+    });
+  } catch (error) {
+    console.error('Error consultando Premium:', error);
+    return false;
+  }
 }
 
 function tieneAcceso(msg, ctx) {
   return esPropietario(msg, ctx) || esPremium(msg, ctx);
+}
+
+function leerDB() {
+  fs.mkdirSync(DB_DIR, { recursive: true });
+
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(
+      DB_FILE,
+      JSON.stringify(
+        { disponibles: [], entregadas: [] },
+        null,
+        2
+      )
+    );
+  }
+
+  const db = JSON.parse(
+    fs.readFileSync(DB_FILE, 'utf8')
+  );
+
+  return {
+    disponibles: Array.isArray(db.disponibles)
+      ? db.disponibles
+      : [],
+    entregadas: Array.isArray(db.entregadas)
+      ? db.entregadas
+      : []
+  };
+}
+
+function guardarDB(db) {
+  fs.mkdirSync(DB_DIR, { recursive: true });
+
+  const temporal = `${DB_FILE}.tmp`;
+
+  fs.writeFileSync(
+    temporal,
+    JSON.stringify(db, null, 2)
+  );
+
+  fs.renameSync(temporal, DB_FILE);
 }
 
 function obtenerTexto(msg, args) {
@@ -159,16 +196,13 @@ async function generarAnimacion(sock, chat, msg) {
   let mensaje;
 
   try {
-    mensaje = await sock.sendMessage(
-      chat,
-      {
-        text:
-          '🚗 *SONICBOT PRO — CAR PARKING*\n\n' +
-          '⚙️ Generando cuenta...\n\n' +
-          frames[0],
-        ...(msg ? { quoted: msg } : {})
-      }
-    );
+    mensaje = await sock.sendMessage(chat, {
+      text:
+        '🚗 *SONICBOT PRO — CAR PARKING*\n\n' +
+        '⚙️ Generando cuenta...\n\n' +
+        frames[0],
+      ...(msg ? { quoted: msg } : {})
+    });
 
     for (let i = 1; i < frames.length; i++) {
       await esperar(350);
@@ -209,9 +243,9 @@ export default {
     const esGrupo = chat.endsWith('@g.us');
 
     const remitente =
+      ctx?.sender ||
       msg?.key?.participantAlt ||
       msg?.key?.participant ||
-      ctx?.sender ||
       '';
 
     // AGREGAR CUENTAS: SOLO EL CREADOR
@@ -219,7 +253,9 @@ export default {
       if (!esPropietario(msg, ctx)) {
         return sock.sendMessage(
           chat,
-          { text: '⛔ Solo el creador del bot puede agregar cuentas.' },
+          {
+            text: '⛔ Solo el creador del bot puede agregar cuentas.'
+          },
           { quoted: msg }
         );
       }
@@ -242,8 +278,12 @@ export default {
         const db = leerDB();
         const correo = credenciales.correo.toLowerCase();
 
-        const existe = [...db.disponibles, ...db.entregadas].some(
-          cuenta => cuenta.correo.toLowerCase() === correo
+        const existe = [
+          ...db.disponibles,
+          ...db.entregadas
+        ].some(
+          cuenta =>
+            String(cuenta.correo).toLowerCase() === correo
         );
 
         if (existe) {
@@ -276,15 +316,19 @@ export default {
       });
     }
 
-    // CUENTA Y STOCK: CREADOR O PREMIUM
-    if (comando === 'cuenta' || comando === 'stockcuentas') {
+    // CUENTA Y STOCK: CREADOR O PREMIUM ACTIVO
+    if (
+      comando === 'cuenta' ||
+      comando === 'stockcuentas'
+    ) {
       if (!tieneAcceso(msg, ctx)) {
         return sock.sendMessage(
           chat,
           {
             text:
               '🔒 *COMANDO PREMIUM*\n\n' +
-              'Este comando es exclusivo para el creador y usuarios Premium.'
+              'No tienes Premium activo o tu usuario no está registrado correctamente.\n\n' +
+              'Contacta al creador del bot para obtener acceso.'
           },
           { quoted: msg }
         );
@@ -330,7 +374,7 @@ export default {
             {
               text:
                 '❌ No pude obtener el identificador del solicitante. ' +
-                'Revisa que el cargador conserve msg.key.participant.'
+                'Revisa que el cargador conserve los datos del remitente.'
             },
             { quoted: msg }
           );
@@ -359,7 +403,10 @@ export default {
               '⚠️ Guarda tus datos de acceso.'
           });
         } catch (error) {
-          console.error('Error enviando cuenta por privado:', error);
+          console.error(
+            'Error enviando cuenta por privado:',
+            error
+          );
 
           return sock.sendMessage(
             chat,
