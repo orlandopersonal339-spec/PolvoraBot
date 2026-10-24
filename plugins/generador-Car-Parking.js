@@ -24,16 +24,12 @@ function leerDB() {
     );
   }
 
-  try {
-    const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+  const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 
-    return {
-      disponibles: Array.isArray(db.disponibles) ? db.disponibles : [],
-      entregadas: Array.isArray(db.entregadas) ? db.entregadas : []
-    };
-  } catch {
-    throw new Error('El archivo de cuentas está dañado. Revisa data/carparking-accounts.json.');
-  }
+  return {
+    disponibles: Array.isArray(db.disponibles) ? db.disponibles : [],
+    entregadas: Array.isArray(db.entregadas) ? db.entregadas : []
+  };
 }
 
 function guardarDB(db) {
@@ -48,20 +44,12 @@ function normalizarJid(jid = '') {
   return String(jid).trim().replace(/:\d+@/, '@');
 }
 
-function obtenerRemitente(msg, ctx) {
-  return (
-    ctx?.sender ||
-    msg?.key?.participant ||
-    msg?.participant ||
-    msg?.key?.remoteJid ||
-    ''
-  );
-}
-
 function esPropietario(msg, ctx) {
   const posibles = [
     ctx?.sender,
+    ctx?.participant,
     msg?.key?.participant,
+    msg?.key?.participantAlt,
     msg?.participant,
     msg?.key?.remoteJid
   ].filter(Boolean);
@@ -72,7 +60,9 @@ function esPropietario(msg, ctx) {
 }
 
 function obtenerTexto(msg, args) {
-  if (Array.isArray(args) && args.length) return args.join(' ');
+  if (Array.isArray(args) && args.length) {
+    return args.join(' ');
+  }
 
   return (
     msg?.message?.conversation ||
@@ -82,32 +72,46 @@ function obtenerTexto(msg, args) {
   );
 }
 
+// CORREGIDO: acepta JID de teléfono y JID de tipo LID.
 function obtenerChatPrivado(msg, ctx) {
-  const jid = msg?.key?.participant || ctx?.sender;
+  const candidatos = [
+    msg?.key?.participantAlt,
+    msg?.key?.participantPn,
+    ctx?.senderPn,
+    msg?.key?.participant,
+    msg?.participant,
+    ctx?.participant,
+    ctx?.sender
+  ];
 
-  if (jid && jid.endsWith('@s.whatsapp.net')) return jid;
+  return candidatos.find(jid => {
+    if (typeof jid !== 'string') return false;
 
-  return '';
+    const destino = jid.trim();
+
+    return (
+      (destino.endsWith('@s.whatsapp.net') ||
+        destino.endsWith('@lid')) &&
+      !destino.endsWith('@g.us')
+    );
+  }) || '';
 }
 
 function extraerCredenciales(texto) {
   const limpio = String(texto)
-    .replace(/^[.!/]\w+\s*/, '')
+    .replace(/^[.!/]?agg\s*/i, '')
     .trim();
 
   const coincidencia = limpio.match(
-    /^(?:gmail\s*:\s*)?([^\s]+@[^ \s]+)\s+(.+)$/i
+    /^(?:gmail\s*:\s*)?([^\s@]+@[^\s@]+\.[^\s@]+)\s+(.+)$/i
   );
 
   if (!coincidencia) return null;
 
-  const correo = coincidencia[1].trim();
-  const contrasena = coincidencia[2].trim();
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return null;
-  if (!contrasena) return null;
-
-  return { correo, contrasena };
+  return {
+    correo: coincidencia[1].trim(),
+    contrasena: coincidencia[2].trim()
+  };
 }
 
 export default {
@@ -116,19 +120,28 @@ export default {
 
   async run(sock, msg, args, ctx) {
     const texto = obtenerTexto(msg, args).trim();
+
     const comando = String(
       ctx?.command ||
       texto.split(/\s+/)[0]?.replace(/^[.!/]/, '') ||
       ''
     ).toLowerCase();
 
-    const esGrupo = String(msg?.key?.remoteJid || '').endsWith('@g.us');
-    const remitente = obtenerRemitente(msg, ctx);
+    const chat = msg?.key?.remoteJid;
+
+    if (!chat) return;
+
+    const esGrupo = chat.endsWith('@g.us');
+    const remitente =
+      msg?.key?.participantAlt ||
+      msg?.key?.participant ||
+      ctx?.sender ||
+      '';
 
     if (comando === 'agg') {
       if (!esPropietario(msg, ctx)) {
         return sock.sendMessage(
-          msg.key.remoteJid,
+          chat,
           { text: '⛔ Solo el propietario puede agregar cuentas.' },
           { quoted: msg }
         );
@@ -138,7 +151,7 @@ export default {
 
       if (!credenciales) {
         return sock.sendMessage(
-          msg.key.remoteJid,
+          chat,
           {
             text:
               '❌ Formato incorrecto.\n\n' +
@@ -150,16 +163,16 @@ export default {
 
       return conBloqueo(async () => {
         const db = leerDB();
-        const correoNormalizado = credenciales.correo.toLowerCase();
+        const correo = credenciales.correo.toLowerCase();
 
         const existe = [...db.disponibles, ...db.entregadas].some(
-          cuenta => cuenta.correo.toLowerCase() === correoNormalizado
+          cuenta => cuenta.correo.toLowerCase() === correo
         );
 
         if (existe) {
           return sock.sendMessage(
-            msg.key.remoteJid,
-            { text: '⚠️ Ese correo ya está registrado en el inventario.' },
+            chat,
+            { text: '⚠️ Ese correo ya está registrado.' },
             { quoted: msg }
           );
         }
@@ -173,7 +186,7 @@ export default {
         guardarDB(db);
 
         return sock.sendMessage(
-          msg.key.remoteJid,
+          chat,
           {
             text:
               '✅ *CUENTA AGREGADA*\n\n' +
@@ -189,7 +202,7 @@ export default {
     if (comando === 'stockcuentas') {
       if (!esPropietario(msg, ctx)) {
         return sock.sendMessage(
-          msg.key.remoteJid,
+          chat,
           { text: '⛔ Solo el propietario puede consultar el inventario.' },
           { quoted: msg }
         );
@@ -198,7 +211,7 @@ export default {
       const db = leerDB();
 
       return sock.sendMessage(
-        msg.key.remoteJid,
+        chat,
         {
           text:
             '🚗 *STOCK CAR PARKING*\n\n' +
@@ -215,30 +228,31 @@ export default {
 
         if (db.disponibles.length === 0) {
           return sock.sendMessage(
-            msg.key.remoteJid,
+            chat,
             { text: '❌ No hay cuentas disponibles.' },
             { quoted: msg }
           );
         }
 
-        const cuenta = db.disponibles[0];
-
-        // En grupos, se intenta enviar la cuenta al solicitante por privado.
+        // En privado, el destino es el chat actual.
+        // En grupos, buscamos al participante que pidió la cuenta.
         const privado = esGrupo
           ? obtenerChatPrivado(msg, ctx)
-          : msg.key.remoteJid;
+          : chat;
 
         if (!privado || privado.endsWith('@g.us')) {
           return sock.sendMessage(
-            msg.key.remoteJid,
+            chat,
             {
               text:
-                '⚠️ No pude identificar tu chat privado. ' +
-                'Escribe al bot por privado y vuelve a usar .cuenta.'
+                '❌ No pude obtener el identificador del solicitante. ' +
+                'Revisa que el cargador del bot conserve msg.key.participant.'
             },
             { quoted: msg }
           );
         }
+
+        const cuenta = db.disponibles[0];
 
         try {
           await sock.sendMessage(privado, {
@@ -248,18 +262,21 @@ export default {
               `🔑 Contraseña: ${cuenta.contrasena}\n\n` +
               '⚠️ Guarda tus datos de acceso.'
           });
-        } catch {
+        } catch (error) {
+          console.error('Error enviando cuenta por privado:', error);
+
           return sock.sendMessage(
-            msg.key.remoteJid,
+            chat,
             {
               text:
-                '❌ No pude enviarte la cuenta por privado. ' +
-                'Abre un chat con el bot y vuelve a intentarlo.'
+                '❌ WhatsApp no permitió enviar la cuenta por privado. ' +
+                'No se descontó del inventario.'
             },
             { quoted: msg }
           );
         }
 
+        // Solo descontar la cuenta después de que el envío se acepte.
         db.disponibles.shift();
         db.entregadas.push({
           ...cuenta,
@@ -271,13 +288,11 @@ export default {
 
         if (esGrupo) {
           await sock.sendMessage(
-            msg.key.remoteJid,
-            { text: '✅ Te envié la cuenta por privado.' },
+            chat,
+            { text: '✅ Cuenta enviada por privado.' },
             { quoted: msg }
           );
         }
-
-        return;
       });
     }
   }
