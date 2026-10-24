@@ -2,7 +2,10 @@
 import fs from 'fs';
 import path from 'path';
 
-const OWNER_JID = '190886046613743@lid';
+const OWNER_IDS = [
+  '190886046613743@lid',
+  '5212731307252@s.whatsapp.net'
+];
 
 const DB_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DB_DIR, 'carparking-accounts.json');
@@ -29,20 +32,20 @@ function obtenerIdentificadores(msg, ctx) {
     ctx?.sender,
     ctx?.participant,
     ctx?.senderPn,
+    ctx?.jid,
     msg?.key?.participant,
     msg?.key?.participantAlt,
     msg?.key?.participantPn,
-    msg?.participant,
-    msg?.key?.remoteJid
-  ].filter(jid => typeof jid === 'string' && jid.length > 0);
+    msg?.participant
+  ].filter(jid => typeof jid === 'string' && jid.length > 0)
+   .map(normalizarJid);
 }
 
 function esPropietario(msg, ctx) {
-  const owner = normalizarJid(OWNER_JID);
+  const propietarios = OWNER_IDS.map(normalizarJid);
+  const identificadores = obtenerIdentificadores(msg, ctx);
 
-  return obtenerIdentificadores(msg, ctx).some(
-    jid => normalizarJid(jid) === owner
-  );
+  return identificadores.some(id => propietarios.includes(id));
 }
 
 function esPremium(msg, ctx) {
@@ -57,16 +60,22 @@ function esPremium(msg, ctx) {
       ? db.users
       : [];
 
-    const identificadores = obtenerIdentificadores(msg, ctx)
-      .map(normalizarJid);
+    const identificadores = obtenerIdentificadores(msg, ctx);
 
     return usuarios.some(usuario => {
-      if (!usuario?.jid || !usuario?.expiresAt) {
+      if (!usuario?.jid || usuario.expiresAt == null) {
         return false;
       }
 
       const jidPremium = normalizarJid(usuario.jid);
-      const expiracion = Date.parse(usuario.expiresAt);
+      const valor = usuario.expiresAt;
+
+      const expiracion =
+        typeof valor === 'number'
+          ? valor
+          : /^\d+$/.test(String(valor))
+            ? Number(valor)
+            : Date.parse(valor);
 
       return (
         identificadores.includes(jidPremium) &&
@@ -98,9 +107,7 @@ function leerDB() {
     );
   }
 
-  const db = JSON.parse(
-    fs.readFileSync(DB_FILE, 'utf8')
-  );
+  const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 
   return {
     disponibles: Array.isArray(db.disponibles)
@@ -117,11 +124,7 @@ function guardarDB(db) {
 
   const temporal = `${DB_FILE}.tmp`;
 
-  fs.writeFileSync(
-    temporal,
-    JSON.stringify(db, null, 2)
-  );
-
+  fs.writeFileSync(temporal, JSON.stringify(db, null, 2));
   fs.renameSync(temporal, DB_FILE);
 }
 
@@ -146,7 +149,8 @@ function obtenerChatPrivado(msg, ctx) {
     msg?.key?.participant,
     msg?.participant,
     ctx?.participant,
-    ctx?.sender
+    ctx?.sender,
+    ctx?.jid
   ];
 
   return candidatos.find(jid => {
@@ -248,14 +252,12 @@ export default {
       msg?.key?.participant ||
       '';
 
-    // AGREGAR CUENTAS: SOLO EL CREADOR
+    // AGREGAR CUENTAS: SOLO EL PROPIETARIO
     if (comando === 'agg') {
       if (!esPropietario(msg, ctx)) {
         return sock.sendMessage(
           chat,
-          {
-            text: '⛔ Solo el creador del bot puede agregar cuentas.'
-          },
+          { text: '⛔ Solo el creador del bot puede agregar cuentas.' },
           { quoted: msg }
         );
       }
@@ -282,8 +284,7 @@ export default {
           ...db.disponibles,
           ...db.entregadas
         ].some(
-          cuenta =>
-            String(cuenta.correo).toLowerCase() === correo
+          cuenta => String(cuenta.correo).toLowerCase() === correo
         );
 
         if (existe) {
@@ -316,11 +317,8 @@ export default {
       });
     }
 
-    // CUENTA Y STOCK: CREADOR O PREMIUM ACTIVO
-    if (
-      comando === 'cuenta' ||
-      comando === 'stockcuentas'
-    ) {
+    // CUENTA Y STOCK: PROPIETARIO O PREMIUM ACTIVO
+    if (comando === 'cuenta' || comando === 'stockcuentas') {
       if (!tieneAcceso(msg, ctx)) {
         return sock.sendMessage(
           chat,
@@ -403,10 +401,7 @@ export default {
               '⚠️ Guarda tus datos de acceso.'
           });
         } catch (error) {
-          console.error(
-            'Error enviando cuenta por privado:',
-            error
-          );
+          console.error('Error enviando cuenta por privado:', error);
 
           return sock.sendMessage(
             chat,
