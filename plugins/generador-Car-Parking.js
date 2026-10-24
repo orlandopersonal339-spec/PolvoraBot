@@ -3,6 +3,13 @@ import fs from 'fs';
 import path from 'path';
 
 const OWNER_JID = '190886046613743@lid';
+
+// Agrega aquí los JID de tus usuarios Premium.
+// Ejemplo: '5212345678901@s.whatsapp.net'
+const PREMIUM_JIDS = [
+  // '5212345678901@s.whatsapp.net',
+];
+
 const DB_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DB_DIR, 'carparking-accounts.json');
 
@@ -48,19 +55,37 @@ function normalizarJid(jid = '') {
   return String(jid).trim().replace(/:\d+@/, '@');
 }
 
-function esPropietario(msg, ctx) {
-  const posibles = [
+function obtenerIdentificadores(msg, ctx) {
+  return [
     ctx?.sender,
     ctx?.participant,
+    ctx?.senderPn,
     msg?.key?.participant,
     msg?.key?.participantAlt,
+    msg?.key?.participantPn,
     msg?.participant,
     msg?.key?.remoteJid
-  ].filter(Boolean);
+  ].filter(jid => typeof jid === 'string' && jid.length > 0);
+}
 
-  return posibles.some(
-    jid => normalizarJid(jid) === normalizarJid(OWNER_JID)
+function esPropietario(msg, ctx) {
+  const owner = normalizarJid(OWNER_JID);
+
+  return obtenerIdentificadores(msg, ctx).some(
+    jid => normalizarJid(jid) === owner
   );
+}
+
+function esPremium(msg, ctx) {
+  const premium = PREMIUM_JIDS.map(normalizarJid);
+
+  return obtenerIdentificadores(msg, ctx).some(
+    jid => premium.includes(normalizarJid(jid))
+  );
+}
+
+function tieneAcceso(msg, ctx) {
+  return esPropietario(msg, ctx) || esPremium(msg, ctx);
 }
 
 function obtenerTexto(msg, args) {
@@ -78,8 +103,8 @@ function obtenerTexto(msg, args) {
 
 function obtenerChatPrivado(msg, ctx) {
   const candidatos = [
-    msg?.key?.participantAlt,
     msg?.key?.participantPn,
+    msg?.key?.participantAlt,
     ctx?.senderPn,
     msg?.key?.participant,
     msg?.participant,
@@ -116,7 +141,6 @@ function extraerCredenciales(texto) {
   };
 }
 
-// Animación de la barra de progreso en el mismo mensaje.
 async function generarAnimacion(sock, chat, msg) {
   const frames = [
     '▱▱▱▱▱▱▱▱▱▱ 0%',
@@ -190,11 +214,12 @@ export default {
       ctx?.sender ||
       '';
 
+    // AGREGAR CUENTAS: SOLO EL CREADOR
     if (comando === 'agg') {
       if (!esPropietario(msg, ctx)) {
         return sock.sendMessage(
           chat,
-          { text: '⛔ Solo el propietario puede agregar cuentas.' },
+          { text: '⛔ Solo el creador del bot puede agregar cuentas.' },
           { quoted: msg }
         );
       }
@@ -251,15 +276,23 @@ export default {
       });
     }
 
-    if (comando === 'stockcuentas') {
-      if (!esPropietario(msg, ctx)) {
+    // CUENTA Y STOCK: CREADOR O PREMIUM
+    if (comando === 'cuenta' || comando === 'stockcuentas') {
+      if (!tieneAcceso(msg, ctx)) {
         return sock.sendMessage(
           chat,
-          { text: '⛔ Solo el propietario puede consultar el inventario.' },
+          {
+            text:
+              '🔒 *COMANDO PREMIUM*\n\n' +
+              'Este comando es exclusivo para el creador y usuarios Premium.'
+          },
           { quoted: msg }
         );
       }
+    }
 
+    // CONSULTAR INVENTARIO
+    if (comando === 'stockcuentas') {
       const db = leerDB();
 
       return sock.sendMessage(
@@ -274,6 +307,7 @@ export default {
       );
     }
 
+    // SOLICITAR CUENTA
     if (comando === 'cuenta') {
       return conBloqueo(async () => {
         const db = leerDB();
@@ -302,10 +336,8 @@ export default {
           );
         }
 
-        // Mostrar y animar la barra en el chat donde pidieron la cuenta.
         await generarAnimacion(sock, chat, msg);
 
-        // Leer de nuevo el inventario por seguridad.
         const inventario = leerDB();
 
         if (inventario.disponibles.length === 0) {
