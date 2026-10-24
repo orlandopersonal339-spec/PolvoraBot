@@ -154,7 +154,11 @@ export default {
     const esDueno =
       normalizarJid(usuario) === normalizarJid(OWNER_JID);
 
-    // AGREGAR CUENTAS CON .agg
+    // AGREGAR CUENTA CON .agg
+    // Formato:
+    // .agg
+    // Gmail: correo@gmail.com
+    // Pass: contraseña
     if (comando === 'agg') {
       if (!esDueno) {
         return responder(
@@ -164,24 +168,29 @@ export default {
         );
       }
 
-      const separador = argumentos.indexOf('|');
+      const gmailMatch = argumentos.match(/Gmail:\s*([^\r\n]+)/i);
+      const passMatch = argumentos.match(/Pass:\s*([^\r\n]+)/i);
 
-      if (separador < 1 || separador === argumentos.length - 1) {
+      if (!gmailMatch || !passMatch) {
         return responder(
           sock,
           remoto,
-          '❌ Formato incorrecto.\n\nUso:\n.agg correo@ejemplo.com|contraseña'
+          '❌ *FORMATO INCORRECTO*\n\n' +
+          '📌 Usa este formato:\n\n' +
+          '.agg\n' +
+          'Gmail: correo@gmail.com\n' +
+          'Pass: contraseña'
         );
       }
 
-      const correo = argumentos.slice(0, separador).trim();
-      const contrasena = argumentos.slice(separador + 1).trim();
+      const correo = gmailMatch[1].trim();
+      const contrasena = passMatch[1].trim();
 
       if (!correo || !contrasena) {
         return responder(
           sock,
           remoto,
-          '❌ Correo o contraseña vacíos.'
+          '❌ El Gmail y el Pass no pueden estar vacíos.'
         );
       }
 
@@ -216,12 +225,20 @@ export default {
         return responder(
           sock,
           remoto,
-          `✅ Cuenta agregada correctamente.\n📦 Disponibles: ${datos.disponibles.length}`
+          '╭━━━ 🚗 *CAR PARKING* 🚗 ━━━╮\n' +
+          '┃\n' +
+          '┃ ✅ *CUENTA AGREGADA*\n' +
+          '┃\n' +
+          `┃ 📧 Gmail: ${correo}\n` +
+          '┃\n' +
+          `┃ 📦 Disponibles: ${datos.disponibles.length}\n` +
+          '┃\n' +
+          '╰━━━━━━━━━━━━━━━━━━━━╯'
         );
       });
     }
 
-    // CONSULTAR INVENTARIO CON .stockcuentas
+    // CONSULTAR INVENTARIO
     if (comando === 'stockcuentas') {
       if (!esDueno) {
         return responder(
@@ -237,14 +254,17 @@ export default {
         return responder(
           sock,
           remoto,
-          `📊 STOCK DE CUENTAS\n\n` +
-          `🟢 Disponibles: ${datos.disponibles.length}\n` +
-          `📤 Entregadas: ${datos.entregadas.length}`
+          '╭━━━ 📊 *STOCK DE CUENTAS* ━━━╮\n' +
+          '┃\n' +
+          `┃ 🟢 Disponibles: ${datos.disponibles.length}\n` +
+          `┃ 📤 Entregadas: ${datos.entregadas.length}\n` +
+          '┃\n' +
+          '╰━━━━━━━━━━━━━━━━━━━━╯'
         );
       });
     }
 
-    // SOLICITAR CUENTA CON .cuenta
+    // SOLICITAR CUENTA
     if (comando !== 'cuenta') return;
 
     return conBloqueo(async () => {
@@ -270,7 +290,7 @@ export default {
 
       const cuenta = datos.disponibles[0];
 
-      // Registrar antes de enviar para evitar duplicados.
+      // Registrar la cuenta para impedir duplicados.
       datos.disponibles.shift();
 
       datos.entregadas.push({
@@ -284,17 +304,21 @@ export default {
       try {
         await sock.sendMessage(destinoPrivado, {
           text:
-            '🚗 *CAR PARKING — TU CUENTA*\n\n' +
-            `📧 Correo: ${cuenta.correo}\n` +
-            `🔐 Contraseña: ${cuenta.contrasena}\n\n` +
-            '⚠️ Guarda tus datos en un lugar seguro.'
+            '╭━━━ 🚗 *CAR PARKING* 🚗 ━━━╮\n' +
+            '┃\n' +
+            '┃ 🎉 *TU CUENTA*\n' +
+            '┃\n' +
+            `┃ 📧 Gmail: ${cuenta.correo}\n` +
+            `┃ 🔐 Pass: ${cuenta.contrasena}\n` +
+            '┃\n' +
+            '╰━━━━━━━━━━━━━━━━━━━━╯'
         });
 
         if (esGrupo) {
           return responder(
             sock,
             remoto,
-            '📩 Revisa tu chat privado; se procesó tu solicitud.'
+            '📩 Revisa tu chat privado.'
           );
         }
       } catch (error) {
