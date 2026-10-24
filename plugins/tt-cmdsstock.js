@@ -1,7 +1,10 @@
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { downloadContentFromMessage } from "@whiskeysockets/baileys";
 
-const filePath = "./ventas.json";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const filePath = path.join(__dirname, "../ventas.json");
 
 const commandsList = [
 "disney","actas","adicionales","alimentos","autobus","boletos","canva","certificados","citas","codigos","combo","combos2","combos3","combos4","combos5","constancias","diamantes","descuentos","dinamica","facturas","fichareportes","gamepass","hbo","imss","justificantes","linkreportes","linkcodigos","libros","lote","maxeo","numerovirtual","netflix","prime","pasesff","pago","pago2","pago3","pago4","pago5","paquete","paquete2","paquete3","paquete4","paquete5","pedrial","peliculas","promo","procesos","programas","promoday","preciosbot","rebote","recargas","recetas","reembolsos","reglas","reportes","rfc","servicios","seguros","spotify","stock","stock2","stock3","stock4","stock5","stock6","stock7","stock8","stock9","stock10","shein","tanda","tramites","universidad","vigencia","vuelos","vix","universal","youtube","hackeos"
@@ -29,21 +32,22 @@ export default {
     if (command.startsWith("set")) {
       const text = args.join(" ").trim();
 
-      const quoted = msg.quoted;
+      const quotedContext = msg.message?.extendedTextMessage?.contextInfo;
+      const quoted = quotedContext?.quotedMessage;
       const directImage = msg.message?.imageMessage;
-      const quotedImage = quoted?.message?.imageMessage;
+      const quotedImage = quoted?.imageMessage;
 
       const texto =
         text ||
-        msg.body?.replace(new RegExp(`^${ctx.prefix}${command}`, "i"), "").trim() ||
-        quoted?.text ||
-        quoted?.caption ||
+        quoted?.conversation ||
+        quoted?.extendedTextMessage?.text ||
+        quoted?.imageMessage?.caption ||
         "";
 
       if (!texto && !directImage && !quotedImage) {
         return sock.sendMessage(
           ctx.jid,
-          { text: `⚠️ Envía o responde a texto o imagen.\n> ${ctx.prefix}${command} ejemplo` },
+          { text: `⚠️ Envía o responde a texto o imagen.\n> ${ctx.prefix || "."}${command} ejemplo` },
           { quoted: msg }
         );
       }
@@ -52,12 +56,12 @@ export default {
 
       try {
         if (quotedImage) {
-          const stream = await downloadContentFromMessage(quoted.message.imageMessage, "image");
+          const stream = await downloadContentFromMessage(quotedImage, "image");
           let buffer = Buffer.alloc(0);
           for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
           imagenBase64 = buffer.toString("base64");
         } else if (directImage) {
-          const stream = await downloadContentFromMessage(msg.message.imageMessage, "image");
+          const stream = await downloadContentFromMessage(directImage, "image");
           let buffer = Buffer.alloc(0);
           for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
           imagenBase64 = buffer.toString("base64");

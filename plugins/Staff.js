@@ -1,6 +1,9 @@
-let handler = async (m, { conn }) => {
+export default {
+  commands: ["colaboradores", "staff"],
+  category: "info",
 
-let staff = `🚩 *EQUIPO OFICIAL DEL BOT*
+  async run(sock, msg, args, ctx) {
+    const staff = `🚩 *EQUIPO OFICIAL DEL BOT*
 
 🤖 *Bot:* SonicBot-MF
 🪐 *Versión:* 1.1.0
@@ -21,24 +24,12 @@ let staff = `🚩 *EQUIPO OFICIAL DEL BOT*
 🛡️ *Moderadores*
 🍭 —
 🍭 —
-🎩 —
-🍭 —
-🎩 —
 
 ━━━━━━━━━━━━━━━
 
-✨ Gracias por usar *SonicBot-MF*
-🚀 Seguimos mejorando para ustedes
-`;
+✨ Gracias por usar *SonicBot*
+🚀 Seguimos mejorando para ustedes`;
 
-await conn.sendMessage(m.chat, {
-    text: staff
-}, { quoted: m });
-
-}
-
-handler.help = ['staff']
-handler.command = ['colaboradores', 'staff']
-handler.tags = ['main']
-
-export default handler
+    await sock.sendMessage(ctx.jid, { text: staff }, { quoted: msg });
+  }
+};

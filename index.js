@@ -1,4 +1,7 @@
+#!/usr/bin/env node
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
@@ -14,9 +17,11 @@ import groupAdmins from "./events/groupAdmins.js";
 import groupSettings from "./events/groupSettings.js";
 import { isWelcomeEnabled, isByeEnabled } from "./utils/welcomeState.js";
 
-console.log("🔥 INDEX INICIADO");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SESSIONS_DIR = path.join(__dirname, "sessions");
+const PLUGINS_DIR = path.join(__dirname, "plugins");
 
-const SESSIONS_DIR = "./sessions";
+console.log("🔥 INICIANDO BOT EN:", __dirname);
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -37,7 +42,7 @@ const getGroupMeta = async (sock, jid) => {
     try {
       const meta = await sock.groupMetadata(jid);
       groupCache[jid] = meta;
-      setTimeout(() => delete groupCache[jid], 5 * 60 * 1000);
+      setTimeout(() => delete groupCache[jid], 15 * 1000);
       return meta;
     } catch {
       return groupCache[jid] || null;
@@ -99,13 +104,14 @@ function clearSessions() {
 }
 
 async function loadHandlerModule() {
-  const handlerModule = await import(`./handler.js?update=${Date.now()}`);
+  const handlerPath = path.join(__dirname, "handler.js");
+  const handlerModule = await import(`file://${handlerPath}?update=${Date.now()}`);
   currentHandler = handlerModule.default;
   currentLoadPlugins = handlerModule.loadPlugins;
 }
 
 async function askLinkMethodOnce(state) {
-  if (state.creds.registered) return;
+  if (state.creds?.registered) return;
 
   if (!pairingMethod) {
     const answer = await question(
@@ -133,12 +139,12 @@ function startWatcher() {
   if (watcherStarted) return;
   watcherStarted = true;
 
-  const watcher = chokidar.watch("./plugins", {
+  const watcher = chokidar.watch([PLUGINS_DIR, path.join(__dirname, "handler.js")], {
     ignoreInitial: true,
-    ignored: ["/node_modules/", "/.git/"],
+    ignored: ["**/node_modules/**", "**/.git/**"],
     awaitWriteFinish: {
       stabilityThreshold: 300,
-      pollInterval: 80
+      pollInterval: 100
     }
   });
 
@@ -222,9 +228,26 @@ async function startBot() {
   try {
     ensureSessionsDir();
 
-    const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
+    let auth = await useMultiFileAuthState(SESSIONS_DIR);
+    let { state, saveCreds } = auth;
+
+    // Si la sesión anterior no terminó de registrarse, limpiar para generar llaves frescas
+    if (state.creds && !state.creds.registered && state.creds.pairingCode) {
+      clearSessions();
+      auth = await useMultiFileAuthState(SESSIONS_DIR);
+      state = auth.state;
+      saveCreds = auth.saveCreds;
+    }
+
     await askLinkMethodOnce(state);
     await loadHandlerModule();
+
+    // 🚀 Cargar plugins inmediatamente para tenerlos listos
+    if (typeof currentLoadPlugins === "function") {
+      console.log("📦 Cargando plugins...");
+      await currentLoadPlugins();
+      pluginsLoaded = true;
+    }
 
     const { version } = await fetchLatestBaileysVersion();
 
@@ -245,12 +268,14 @@ async function startBot() {
     const sock = makeWASocket({
       logger: pino({ level: "silent" }),
       auth: state,
-      browser: Browsers.macOS("Desktop"),
+      browser: Browsers.ubuntu("Chrome"),
       version,
       connectTimeoutMs: 60000,
+      defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 10000,
       markOnlineOnConnect: false,
       syncFullHistory: false,
-      printQRInTerminal: pairingMethod !== "code",
+      printQRInTerminal: false,
       cachedGroupMetadata: async jid => {
         try {
           return await getGroupMeta(sock, jid);
@@ -305,40 +330,37 @@ async function startBot() {
       }
     };
 
+    // Disparar código de vinculación de manera segura
+    if (pairingMethod === "code" && !state.creds?.registered && phoneNumber) {
+      setTimeout(async () => {
+        if (!pairingCodeRequested && currentSock) {
+          try {
+            pairingCodeRequested = true;
+            const code = await currentSock.requestPairingCode(phoneNumber);
+            const cleanCode = String(code).replace(/[-\s]/g, "");
+            console.log(`\n🔗 Código de vinculación: ${cleanCode}`);
+            console.log("📌 Ingresa ese código en WhatsApp (Dispositivos vinculados -> Vincular con código de teléfono)\n");
+          } catch (err) {
+            pairingCodeRequested = false;
+            console.error("❌ Error solicitando código de vinculación:", err);
+          }
+        }
+      }, 3000);
+    }
+
     sock.ev.on("connection.update", async update => {
       const { connection, lastDisconnect, qr } = update;
 
       try {
         if (qr && pairingMethod === "qr") {
-          console.clear();
-          console.log("📱 Escanea este QR para vincular el bot:\n");
+          console.log("\n📱 Escanea este código QR con WhatsApp:\n");
           qrcode.generate(qr, { small: true });
         }
 
-        if (
-          pairingMethod === "code" &&
-          !state.creds.registered &&
-          phoneNumber &&
-          !pairingCodeRequested &&
-          connection === "connecting"
-        ) {
-          pairingCodeRequested = true;
-
-          setTimeout(async () => {
-            try {
-              const code = await sock.requestPairingCode(phoneNumber);
-              const cleanCode = String(code).replace(/[-\s]/g, "");
-              console.log(`🔗 Código de vinculación: ${cleanCode}`);
-              console.log("📌 Ingresa ese código en WhatsApp para vincular el dispositivo");
-            } catch (err) {
-              pairingCodeRequested = false;
-              console.error("❌ Error solicitando código de vinculación:", err);
-            }
-          }, 2000);
-        }
-
         if (connection === "open") {
-          console.log("✅ ADRIBOT CONECTADO");
+          console.log("\n=================================");
+          console.log("✅ ADRIBOT CONECTADO CORRECTAMENTE");
+          console.log("=================================\n");
           pairingCodeRequested = false;
 
           if (reconnectTimer) {
@@ -348,10 +370,9 @@ async function startBot() {
 
           reconnecting = false;
 
-          if (!pluginsLoaded) {
+          if (!pluginsLoaded && typeof currentLoadPlugins === "function") {
             await currentLoadPlugins();
             pluginsLoaded = true;
-            console.log("🔥 Plugins cargados");
           }
 
           startWatcher();
@@ -379,11 +400,16 @@ async function startBot() {
 
     sock.ev.on("messages.upsert", async ({ messages }) => {
       for (const msg of messages) {
+        if (!msg || !msg.message) continue;
         if (msg.key?.remoteJid === "status@broadcast") continue;
 
+        // Desempaquetar capas de mensajes en WhatsApp
         msg.message =
           msg.message?.ephemeralMessage?.message ||
           msg.message?.viewOnceMessage?.message ||
+          msg.message?.viewOnceMessageV2?.message?.message ||
+          msg.message?.viewOnceMessageV2?.message ||
+          msg.message?.documentWithCaptionMessage?.message ||
           msg.message;
 
         if (!msg.message) continue;
@@ -402,23 +428,72 @@ async function startBot() {
       try {
         const { id, participants, action } = update;
         if (!["add", "remove"].includes(action)) return;
+        if (!participants || !participants.length) return;
 
         const metadata = await getGroupMeta(sock, id);
         if (!metadata) return;
 
+        const extractJid = p => {
+          if (!p) return "";
+          if (typeof p === "string") return p;
+          if (typeof p === "object") return p.id || p.jid || p.phoneNumber || "";
+          return String(p);
+        };
+
+        const botIdentifiers = [
+          sock.user?.id?.replace(/\D/g, ""),
+          sock.user?.lid?.replace(/\D/g, "")
+        ].filter(Boolean);
+
+        const welcomeImg = path.join(__dirname, "media/welcome.png");
+        const byeImg = path.join(__dirname, "media/bye.png");
+
         for (const user of participants) {
-          if (action === "add" && isWelcomeEnabled(id)) {
+          const uJid = extractJid(user);
+          if (!uJid) continue;
+          const num = uJid.split("@")[0].replace(/\D/g, "") || uJid.split("@")[0];
+
+          // Si el bot fue añadido al grupo
+          if (action === "add" && botIdentifiers.includes(num)) {
             await sock.sendMessage(id, {
-              text: `👋 Bienvenido @${user.split("@")[0]}`,
-              mentions: [user]
+              text: `👋 *¡Hola a todos!* Gracias por agregarme a *${metadata?.subject || "este grupo"}*.\nEscribe *${config.prefix || "."}menu* para ver la lista de comandos disponibles.`
             });
+            continue;
+          }
+
+          if (action === "add" && isWelcomeEnabled(id)) {
+            const desc = metadata?.desc ? `\n\n📜 *Descripción:*\n${metadata.desc}` : "";
+            const caption = `👋 *¡Bienvenido/a al grupo!*\n━━━━━━━━━━━━━━━\n👤 *Usuario:* @${num}\n👥 *Grupo:* *${metadata?.subject || "este grupo"}*${desc}\n━━━━━━━━━━━━━━━`.trim();
+
+            if (fs.existsSync(welcomeImg)) {
+              await sock.sendMessage(id, {
+                image: fs.readFileSync(welcomeImg),
+                caption,
+                mentions: [uJid]
+              });
+            } else {
+              await sock.sendMessage(id, {
+                text: caption,
+                mentions: [uJid]
+              });
+            }
           }
 
           if (action === "remove" && isByeEnabled(id)) {
-            await sock.sendMessage(id, {
-              text: `👋 Adiós @${user.split("@")[0]}`,
-              mentions: [user]
-            });
+            const caption = `👋 *¡Hasta luego!*\n━━━━━━━━━━━━━━━\n👤 @${num} ha salido del grupo.\n━━━━━━━━━━━━━━━`.trim();
+
+            if (fs.existsSync(byeImg)) {
+              await sock.sendMessage(id, {
+                image: fs.readFileSync(byeImg),
+                caption,
+                mentions: [uJid]
+              });
+            } else {
+              await sock.sendMessage(id, {
+                text: caption,
+                mentions: [uJid]
+              });
+            }
           }
         }
       } catch (err) {

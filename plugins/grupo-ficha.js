@@ -1,86 +1,97 @@
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
-const DATA_DIR = "./data";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = path.join(__dirname, "../data");
 const FILE = path.join(DATA_DIR, "fichas.json");
 
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
-if (!fs.existsSync(FILE)) fs.writeFileSync(FILE, "{}");
+if (!fs.existsSync(DATA_DIR)) {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+}
+if (!fs.existsSync(FILE)) {
+  try { fs.writeFileSync(FILE, "{}"); } catch {}
+}
 
-const load = () => JSON.parse(fs.readFileSync(FILE));
-const save = (data) =>
-  fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
+const load = () => {
+  try {
+    return JSON.parse(fs.readFileSync(FILE, "utf-8"));
+  } catch {
+    return {};
+  }
+};
+
+const save = (data) => {
+  try {
+    fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error("❌ Error guardando fichas:", e);
+  }
+};
 
 export default {
   commands: ["ficha", "setficha", "delficha"],
   admin: false,
+  category: "grupo",
+  description: "Guarda, muestra o elimina la ficha informativa del grupo.",
 
   async run(sock, msg, args, ctx) {
     const { jid, isGroup, isAdmin } = ctx;
+
+    if (!isGroup) {
+      return sock.sendMessage(jid, { text: "❌ Este comando solo funciona en grupos." }, { quoted: msg });
+    }
+
     const data = load();
-
-    // TEXTO REAL
-    const text =
-      msg.message?.conversation ||
-      msg.message?.extendedTextMessage?.text ||
-      "";
-
-    const lower = text.toLowerCase();
+    const cmd = (ctx.command || "").toLowerCase();
 
     // ===============================
     // 📌 SETFICHA (CREA / REEMPLAZA)
     // ===============================
-    if (lower.startsWith(".setficha")) {
-
-      if (!isGroup)
-        return sock.sendMessage(jid, { text: "❌ Solo funciona en grupos." });
-
-      if (!isAdmin)
+    if (cmd === "setficha") {
+      if (!isAdmin) {
         return sock.sendMessage(jid, {
-          text: "❌ Solo administradores pueden usar este comando."
-        });
+          text: "❌ Solo los administradores pueden configurar la ficha del grupo."
+        }, { quoted: msg });
+      }
 
-      const content = text.replace(/^\.setficha\s*/i, "");
-
-      if (!content.trim())
+      const content = args.join(" ").trim();
+      if (!content) {
         return sock.sendMessage(jid, {
-          text: "✏️ Escribe la ficha después del comando."
-        });
+          text: `✏️ Escribe el texto de la ficha.\nEjemplo: *${ctx.prefix || "."}setficha Reglas del grupo...*`
+        }, { quoted: msg });
+      }
 
-      // 🔥 SOBREESCRIBE SI YA EXISTE
       data[jid] = content;
       save(data);
 
       return sock.sendMessage(jid, {
-        text: "✅ *Ficha guardada / actualizada correctamente*"
-      });
+        text: "✅ *Ficha del grupo guardada correctamente.*"
+      }, { quoted: msg });
     }
 
     // ===============================
     // 🗑️ DELFICHA (ELIMINAR)
     // ===============================
-    if (lower.startsWith(".delficha")) {
-
-      if (!isGroup)
-        return sock.sendMessage(jid, { text: "❌ Solo funciona en grupos." });
-
-      if (!isAdmin)
+    if (cmd === "delficha") {
+      if (!isAdmin) {
         return sock.sendMessage(jid, {
-          text: "❌ Solo administradores pueden usar este comando."
-        });
+          text: "❌ Solo los administradores pueden eliminar la ficha del grupo."
+        }, { quoted: msg });
+      }
 
       if (!data[jid]) {
         return sock.sendMessage(jid, {
-          text: "📄 No hay ninguna ficha para eliminar."
-        });
+          text: "📄 No hay ninguna ficha guardada en este grupo para eliminar."
+        }, { quoted: msg });
       }
 
       delete data[jid];
       save(data);
 
       return sock.sendMessage(jid, {
-        text: "🗑️ *Ficha eliminada correctamente*"
-      });
+        text: "🗑️ *Ficha del grupo eliminada correctamente.*"
+      }, { quoted: msg });
     }
 
     // ===============================
@@ -88,12 +99,12 @@ export default {
     // ===============================
     if (!data[jid]) {
       return sock.sendMessage(jid, {
-        text: "📄 No hay ficha configurada en este grupo."
-      });
+        text: `📄 No hay ficha configurada en este grupo.\nLos administradores pueden crear una con *${ctx.prefix || "."}setficha <texto>*`
+      }, { quoted: msg });
     }
 
     return sock.sendMessage(jid, {
       text: `📌 *FICHA DEL GRUPO*\n\n${data[jid]}`
-    });
+    }, { quoted: msg });
   }
 };

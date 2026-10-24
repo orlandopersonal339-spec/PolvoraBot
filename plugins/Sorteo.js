@@ -1,67 +1,59 @@
-const toM = (a) => '@' + a.split('@')[0];
+const toM = a => "@" + a.split("@")[0];
 
-let handler = async (m, { conn, groupMetadata, text }) => {
-  if (!m.isGroup) {
-    return conn.reply(m.chat, "❌ Este comando solo es para grupos.", m);
-  }
+export default {
+  commands: ["sorteo"],
+  category: "grupo",
 
-  const participantes = groupMetadata.participants
-    .map(p => p.id)
-    .filter(id => id !== conn.user.jid);
+  async run(sock, msg, args, ctx) {
+    const jid = ctx.jid;
 
-  if (participantes.length < 2) {
-    return conn.reply(m.chat, "❌ No hay suficientes participantes.", m);
-  }
+    if (!ctx.isGroup) {
+      return sock.sendMessage(jid, { text: "❌ Este comando solo es para grupos." }, { quoted: msg });
+    }
 
-  // 🔥 LIMPIAR EL COMANDO DEL TEXTO
-  let premio = (m.text || "")
-    .replace(/^\.sorteo\s*/i, "") // quita ".sorteo"
-    .trim();
+    const botJid = sock.user?.id ? sock.user.id.split(":")[0] + "@s.whatsapp.net" : "";
+    const participantes = (ctx.participants || [])
+      .map(p => p.id)
+      .filter(id => id && id !== botJid);
 
-  if (!premio) premio = "un premio sorpresa 🎁";
+    if (participantes.length < 2) {
+      return sock.sendMessage(jid, { text: "❌ No hay suficientes participantes en el grupo." }, { quoted: msg });
+    }
 
-  // 🔄 Barra de carga
-  let carga = [
-    "▒▒▒▒▒▒▒▒▒▒ 0%",
-    "██▒▒▒▒▒▒▒▒ 20%",
-    "████▒▒▒▒▒▒ 40%",
-    "██████▒▒▒▒ 60%",
-    "████████▒▒ 80%",
-    "██████████ 100%"
-  ];
+    // Limpiar premio
+    let premio = args.join(" ").trim();
+    if (!premio) premio = "un premio sorpresa 🎁";
 
-  let msg = await conn.sendMessage(m.chat, {
-    text: "🎰 Iniciando sorteo...\n\n" + carga[0]
-  }, { quoted: m });
+    // Barra de carga
+    const carga = [
+      "▒▒▒▒▒▒▒▒▒▒ 0%",
+      "██▒▒▒▒▒▒▒▒ 20%",
+      "████▒▒▒▒▒▒ 40%",
+      "██████▒▒▒▒ 60%",
+      "████████▒▒ 80%",
+      "██████████ 100%"
+    ];
 
-  for (let i = 1; i < carga.length; i++) {
-    await new Promise(r => setTimeout(r, 800));
+    const sent = await sock.sendMessage(jid, {
+      text: "🎰 Iniciando sorteo...\n\n" + carga[0]
+    }, { quoted: msg });
 
-    await conn.sendMessage(m.chat, {
-      text: "🎰 Iniciando sorteo...\n\n" + carga[i],
-      edit: msg.key
+    for (let i = 1; i < carga.length; i++) {
+      await new Promise(r => setTimeout(r, 600));
+      await sock.sendMessage(jid, {
+        text: "🎰 Iniciando sorteo...\n\n" + carga[i],
+        edit: sent.key
+      });
+    }
+
+    // Ganador
+    const ganador = participantes[Math.floor(Math.random() * participantes.length)];
+    await new Promise(r => setTimeout(r, 500));
+
+    await sock.sendMessage(jid, {
+      text: `🎉 *SORTEO FINALIZADO*\n\n👑 Ganador: ${toM(ganador)}\n🎁 Premio: ${premio}\n\n¡Felicidades! 🎊`,
+      mentions: [ganador],
+      edit: sent.key
     });
   }
-
-  // 🎯 Ganador
-  const ganador = participantes[Math.floor(Math.random() * participantes.length)];
-
-  await new Promise(r => setTimeout(r, 500));
-
-  // 🎉 Resultado limpio
-  await conn.sendMessage(m.chat, {
-    text:
-`🎉 *SORTEO FINALIZADO*
-
-👑 Ganador: ${toM(ganador)}
-
-🎁 Premio: ${premio}
-
-Felicidades 🎊`,
-    mentions: [ganador],
-    edit: msg.key
-  });
 };
-
-handler.command = ['sorteo'];
-export default handler;

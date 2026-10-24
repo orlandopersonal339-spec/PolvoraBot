@@ -11,10 +11,12 @@ export default {
     const mentioned =
       msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
 
+    const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+
     if (mentioned.length) {
       who = mentioned[0];
-    } else if (msg.quoted?.sender) {
-      who = msg.quoted.sender;
+    } else if (contextInfo?.participant) {
+      who = contextInfo.participant;
     } else {
       return sock.sendMessage(
         ctx.jid,

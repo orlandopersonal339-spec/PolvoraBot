@@ -1,5 +1,8 @@
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 global._totalfuncionesHandled ??= new Set();
 
@@ -16,7 +19,7 @@ export default {
     if (msgId) global._totalfuncionesHandled.add(msgId);
 
     try {
-      const pluginsDir = path.join(process.cwd(), "plugins");
+      const pluginsDir = __dirname;
       const files = fs
         .readdirSync(pluginsDir)
         .filter(file => file.endsWith(".js"));
@@ -25,7 +28,7 @@ export default {
 
       await sock.sendMessage(
         ctx.jid,
-        { text: `✅ *TOTAL DE COMANDOS SONICBOT-ST:* ${total}` },
+        { text: `✅ *TOTAL DE PLUGINS / COMANDOS:* ${total}` },
         { quoted: msg }
       );
     } catch (e) {

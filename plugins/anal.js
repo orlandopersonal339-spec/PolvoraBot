@@ -1,58 +1,62 @@
-// Código creado por Destroy wa.me/584120346669
-// update x Orlando157
+export default {
+  commands: ["anal"],
+  category: "diversion",
 
-let handler = async (m, { conn }) => {
-    let who;
+  async run(sock, msg, args, ctx) {
+    const jid = ctx.jid;
+    const m = msg.message || {};
+    const quoted = m?.extendedTextMessage?.contextInfo;
 
-    // 🔥 Detectar correctamente a quién va dirigido
-    if (m.mentionedJid?.length) {
-        who = m.mentionedJid[0];
-    } else if (m.quoted?.sender) {
-        who = m.quoted.sender;
+    let who = null;
+    if (quoted?.mentionedJid?.length) {
+      who = quoted.mentionedJid[0];
+    } else if (quoted?.participant) {
+      who = quoted.participant;
     } else {
-        who = m.sender;
+      who = ctx.sender;
     }
 
-    const name = await conn.getName(who);
-    const name2 = await conn.getName(m.sender);
+    const name = await sock.getName(who);
+    const name2 = await sock.getName(ctx.sender);
 
-    m.react('🥵');
+    try {
+      await sock.sendMessage(jid, { react: { text: "🥵", key: msg.key } });
+    } catch {}
 
-    // 🔥 TEXTO ORIGINAL (sin cambios)
     let str;
-    if (m.mentionedJid?.length) {
-        str = `\`${name2}\` le partio el culo a la puta de \`${name || who}\`.`;
-    } else if (m.quoted) {
-        str = `\`${name2}\` se la metio en el ano a \`${name || who}\`.`;
+    if (quoted?.mentionedJid?.length) {
+      str = `\`${name2}\` le partió el culo a \`${name || who}\`.`;
+    } else if (quoted?.participant) {
+      str = `\`${name2}\` se la metió a \`${name || who}\`.`;
     } else {
-        str = `\`${name2}\` esta haciendo un anal`;
+      str = `\`${name2}\` está haciendo un anal`;
     }
 
-    if (m.isGroup) {
-        const videos = [
-            'https://telegra.ph/file/7185b0be7a315706d086a.mp4',
-            'https://telegra.ph/file/a11625fef11d628d3c8df.mp4',
-            'https://telegra.ph/file/062b9506656e89b069618.mp4',
-            'https://telegra.ph/file/1325494a54adc9a87ec56.mp4',
-            'https://qu.ax/KKazS.mp4',
-            'https://qu.ax/ieJeB.mp4',
-            'https://qu.ax/MCdGn.mp4'
-        ];
+    if (ctx.isGroup) {
+      const videos = [
+        "https://qu.ax/KKazS.mp4",
+        "https://qu.ax/ieJeB.mp4",
+        "https://qu.ax/MCdGn.mp4"
+      ];
 
-        const video = videos[Math.floor(Math.random() * videos.length)];
+      const video = videos[Math.floor(Math.random() * videos.length)];
 
-        await conn.sendMessage(m.chat, {
-            video: { url: video },
-            gifPlayback: true,
-            caption: str,
-            mentions: [who] // 🔥 menciona correctamente SIEMPRE
-        }, { quoted: m });
+      await sock.sendMessage(
+        jid,
+        {
+          video: { url: video },
+          gifPlayback: true,
+          caption: str,
+          mentions: [who]
+        },
+        { quoted: msg }
+      );
+    } else {
+      await sock.sendMessage(
+        jid,
+        { text: str, mentions: [who] },
+        { quoted: msg }
+      );
     }
+  }
 };
-
-handler.help = ['anal @tag', 'culiar @tag'];
-handler.tags = ['emox'];
-handler.command = ['anal','culiar'];
-handler.group = true;
-
-export default handler;

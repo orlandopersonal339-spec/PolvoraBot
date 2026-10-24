@@ -1,0 +1,15 @@
+node_modules/
+sessions/
+tmp/
+tmp-stickers/
+*.log
+logs.txt
+store.json
+cmd-state.json
+mutelist.json
+welcome.json
+ventas.json
+modoadmins.json
+data/
+*.zip
+.env

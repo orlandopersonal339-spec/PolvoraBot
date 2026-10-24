@@ -1,9 +1,14 @@
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const file = "./welcome.json";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const file = path.join(__dirname, "../welcome.json");
 
 if (!fs.existsSync(file)) {
-  fs.writeFileSync(file, JSON.stringify({}, null, 2));
+  try {
+    fs.writeFileSync(file, JSON.stringify({}, null, 2));
+  } catch {}
 }
 
 let cache = {};
@@ -39,8 +44,9 @@ export const disableWelcome = jid => {
   save();
 };
 
+// Por defecto activado a menos que se desactive explícitamente con .welcome off
 export const isWelcomeEnabled = jid => {
-  return cache[jid]?.welcome === true;
+  return cache[jid]?.welcome !== false;
 };
 
 export const enableBye = jid => {
@@ -55,6 +61,7 @@ export const disableBye = jid => {
   save();
 };
 
+// Por defecto activado a menos que se desactive explícitamente con .bye off
 export const isByeEnabled = jid => {
-  return cache[jid]?.bye === true;
+  return cache[jid]?.bye !== false;
 };

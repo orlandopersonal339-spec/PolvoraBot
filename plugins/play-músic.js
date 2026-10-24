@@ -1,89 +1,124 @@
-/*
-- API PRIVADA Y APIKEY PRIVADA
-- ESTE ARCHIVO PERTENECE A https://github.com/WillZek
-- Soy Programador profesional
-- contacto: wa.me/50557865603
-- no robar, archivo privado para adrian
-*/
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import yts from "yt-search";
 
-import fetch from 'node-fetch'
-import yts from 'yt-search'
-
-const APIKEY = 'c50919b9828c357cd81e753f03d4c000'
+const execFileAsync = promisify(execFile);
 
 export default {
-  commands: ['play', 'musicdl'],
-  category: 'descargas',
+  commands: ["play", "musicdl", "mp3"],
+  category: "descargas",
   admin: false,
-  description: 'Descarga audio de YouTube',
+  description: "Descarga audio de YouTube",
 
   async run(sock, msg, args, ctx) {
-    const jid = msg.key.remoteJid
-    const text = args.join(' ')
+    const jid = msg.key.remoteJid;
+    const text = args.join(" ").trim();
 
     if (!text) {
       return sock.sendMessage(
         jid,
         {
-          text: `🪐 Ingresa un texto o link de YouTube
-Ejemplo: *play autos edits*`
+          text: `🪐 Ingresa un título o link de YouTube\nEjemplo: *${ctx.prefix || "."}play autos edits*`
         },
         { quoted: msg }
-      )
+      );
     }
 
-    let video
-    const isLink = text.includes('youtube.com') || text.includes('youtu.be')
+    let video = null;
+    const isLink = text.includes("youtube.com") || text.includes("youtu.be");
 
     try {
       if (isLink) {
         const id =
-          text.split('v=')[1]?.split('&')[0] ||
-          text.split('/').pop()
+          text.split("v=")[1]?.split("&")[0] ||
+          text.split("/").pop()?.split("?")[0];
 
-        const res = await yts({ videoId: id })
-        video = res
+        const res = await yts({ videoId: id });
+        video = res;
       } else {
-        const res = await yts(text)
-        video = res.videos[0]
+        const res = await yts(text);
+        video = res?.videos?.[0] || null;
       }
 
-      if (!video) throw 'Video no encontrado'
+      if (!video || !video.url) {
+        throw new Error("No se encontró ningún video con esa búsqueda.");
+      }
 
-      await sock.sendMessage(
-        jid,
-        { text: `🪐 Descargando audio de *${video.title}*...` },
-        { quoted: msg }
-      )
-
-      const apiURL =
-        `https://optishield.uk/api/?type=youtubedl` +
-        `&apikey=${APIKEY}` +
-        `&url=${encodeURIComponent(video.url)}` +
-        `&video=0`
-
-      const apiRes = await fetch(apiURL)
-      const json = await apiRes.json()
-
-      if (!json?.result?.download)
-        throw 'No se pudo obtener el audio'
+      if (video.seconds && video.seconds > 600) {
+        throw new Error(`El audio es muy largo (${video.timestamp}). Límite: 10 minutos.`);
+      }
 
       await sock.sendMessage(
         jid,
         {
-          audio: { url: json.result.download },
-          mimetype: 'audio/mpeg',
-          fileName: `${video.title}.mp3`
+          text: `🪐 Descargando audio de *${video.title}* (${video.timestamp || "Audio"})...`
         },
         { quoted: msg }
-      )
+      );
+
+      const tmpBase = path.join(os.tmpdir(), `play_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+      const outPattern = `${tmpBase}.%(ext)s`;
+      const outMp3 = `${tmpBase}.mp3`;
+
+      try {
+        await execFileAsync(
+          "yt-dlp",
+          [
+            "--js-runtimes",
+            "node",
+            "-f",
+            "ba/b",
+            "-x",
+            "--audio-format",
+            "mp3",
+            "--audio-quality",
+            "128K",
+            "--no-playlist",
+            "--max-filesize",
+            "30M",
+            "-o",
+            outPattern,
+            video.url
+          ],
+          { timeout: 70000 }
+        );
+
+        if (!fs.existsSync(outMp3)) {
+          throw new Error("No se pudo generar el archivo MP3.");
+        }
+
+        const audioBuffer = fs.readFileSync(outMp3);
+        const safeTitle = (video.title || "audio").replace(/[/\\?%*:|"<>]/g, "");
+
+        await sock.sendMessage(
+          jid,
+          {
+            audio: audioBuffer,
+            mimetype: "audio/mpeg",
+            fileName: `${safeTitle}.mp3`
+          },
+          { quoted: msg }
+        );
+      } finally {
+        // Limpieza de archivos temporales
+        try {
+          if (fs.existsSync(outMp3)) fs.unlinkSync(outMp3);
+          const webmFile = `${tmpBase}.webm`;
+          if (fs.existsSync(webmFile)) fs.unlinkSync(webmFile);
+        } catch {}
+      }
 
     } catch (e) {
+      console.error("❌ Error en play:", e);
+      const errMsg = e?.message || e?.stderr || String(e);
       await sock.sendMessage(
         jid,
-        { text: `🌱 Error\n${e}` },
+        { text: `🌱 Error al descargar:\n${errMsg}` },
         { quoted: msg }
-      )
+      );
     }
   }
-}
+};

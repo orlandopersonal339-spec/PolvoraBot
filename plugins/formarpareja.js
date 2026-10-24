@@ -1,55 +1,51 @@
 function tag(user) {
-  return '@' + user.split('@')[0]
+  return "@" + user.split("@")[0];
 }
 
 function random(arr) {
-  return arr[Math.floor(Math.random() * arr.length)]
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 export default {
   commands: ["formarpareja", "pareja"],
   category: "funny",
   group: true,
+  description: "Elige una pareja al azar en el grupo",
 
   async run(sock, msg, args, ctx) {
+    if (!ctx.isGroup) {
+      return sock.sendMessage(
+        ctx.jid,
+        { text: "❌ Este comando solo funciona en grupos." },
+        { quoted: msg }
+      );
+    }
 
     try {
+      let users = (ctx.participants || []).map(p => p.id);
 
-      // ===============================
-      // PARTICIPANTES
-      // ===============================
-      const metadata =
-        await sock.groupMetadata(ctx.jid)
+      if (!users.length) {
+        try {
+          const metadata = await sock.groupMetadata(ctx.jid);
+          users = (metadata?.participants || []).map(p => p.id);
+        } catch {}
+      }
 
-      const users = metadata.participants
-        .map(p => p.id)
-
-      // ===============================
-      // VALIDAR
-      // ===============================
       if (users.length < 2) {
         return await sock.sendMessage(
           ctx.jid,
-          {
-            text: "⚠️ Se necesitan mínimo 2 personas"
-          },
+          { text: "⚠️ Se necesitan mínimo 2 personas en el grupo." },
           { quoted: msg }
-        )
+        );
       }
 
-      // ===============================
-      // ELEGIR PAREJA
-      // ===============================
-      let user1 = random(users)
-      let user2
+      let user1 = random(users);
+      let user2;
 
       do {
-        user2 = random(users)
-      } while (user1 === user2)
+        user2 = random(users);
+      } while (user1 === user2);
 
-      // ===============================
-      // FRASES
-      // ===============================
       const frases = [
         `💖 ${tag(user1)} y ${tag(user2)} hacen una pareja hermosa 🥺`,
         `🌹 ${tag(user1)} encontró felicidad al lado de ${tag(user2)} ✨`,
@@ -61,14 +57,10 @@ export default {
         `🫶 ${tag(user1)} y ${tag(user2)} serían una relación muy tierna 🥺`,
         `💞 Entre ${tag(user1)} y ${tag(user2)} hay sentimientos reales 😳`,
         `🌷 ${tag(user1)} y ${tag(user2)} combinan perfectamente 💘`
-      ]
+      ];
 
-      const texto =
-        frases[Math.floor(Math.random() * frases.length)]
+      const texto = frases[Math.floor(Math.random() * frases.length)];
 
-      // ===============================
-      // ENVIAR
-      // ===============================
       await sock.sendMessage(
         ctx.jid,
         {
@@ -76,20 +68,15 @@ export default {
           mentions: [user1, user2]
         },
         { quoted: msg }
-      )
+      );
 
     } catch (e) {
-
-      console.error("❌ Error en formarpareja:", e)
-
+      console.error("❌ Error en formarpareja:", e);
       await sock.sendMessage(
         ctx.jid,
-        {
-          text: "⚠️ Error al formar pareja"
-        },
+        { text: "⚠️ Error al formar pareja." },
         { quoted: msg }
-      )
-
+      );
     }
   }
-}
+};

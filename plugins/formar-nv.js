@@ -2,39 +2,46 @@ export default {
   commands: ["formarnv"],
   category: "fun",
   group: true,
+  description: "Forma una pareja al azar en el grupo",
 
   async run(sock, msg, args, ctx) {
-
-    // ===============================
-    // OBTENER PARTICIPANTES
-    // ===============================
-    const metadata = await sock.groupMetadata(ctx.jid)
-    const ps = metadata.participants.map(v => v.id)
-
-    if (ps.length < 2) {
-      return sock.sendMessage(ctx.jid, {
-        text: "😏 Ups... se necesitan al menos 2 personas para formar una pareja coqueta 💕"
-      }, { quoted: msg })
+    if (!ctx.isGroup) {
+      return sock.sendMessage(
+        ctx.jid,
+        { text: "❌ Este comando solo funciona en grupos." },
+        { quoted: msg }
+      );
     }
 
-    // ===============================
-    // RANDOM
-    // ===============================
-    const getRandom = () => ps[Math.floor(Math.random() * ps.length)]
+    let ps = (ctx.participants || []).map(v => v.id);
 
-    let a = getRandom()
-    let b
+    if (!ps.length) {
+      try {
+        const metadata = await sock.groupMetadata(ctx.jid);
+        ps = (metadata?.participants || []).map(v => v.id);
+      } catch {}
+    }
+
+    if (ps.length < 2) {
+      return sock.sendMessage(
+        ctx.jid,
+        { text: "😏 Ups... se necesitan al menos 2 personas para formar una pareja 💕" },
+        { quoted: msg }
+      );
+    }
+
+    const getRandom = () => ps[Math.floor(Math.random() * ps.length)];
+
+    let a = getRandom();
+    let b;
 
     do {
-      b = getRandom()
-    } while (b === a)
+      b = getRandom();
+    } while (b === a);
 
-    const tagA = "@" + a.split("@")[0]
-    const tagB = "@" + b.split("@")[0]
+    const tagA = "@" + a.split("@")[0];
+    const tagB = "@" + b.split("@")[0];
 
-    // ===============================
-    // MENSAJE FINAL
-    // ===============================
     await sock.sendMessage(
       ctx.jid,
       {
@@ -42,6 +49,6 @@ export default {
         mentions: [a, b]
       },
       { quoted: msg }
-    )
+    );
   }
-}
+};

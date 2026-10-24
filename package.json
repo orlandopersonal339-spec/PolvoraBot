@@ -1,25 +1,27 @@
-
 {
   "name": "ADRIBOT",
   "version": "1.0.0",
   "description": "Bot WhatsApp Multi-Device estilo plugins",
   "main": "index.js",
+  "bin": {
+    "bot": "./index.js"
+  },
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "postinstall": "node setup-bin.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "pino": "^8.0.0",
     "qrcode-terminal": "^0.12.0",
     "axios": "^1.6.0",
-    "yt-search": "*",
-    "formdata-node": "latest",
-    "node-fetch": "latest",
-    "moment-timezone": "^0.5.43",
+    "yt-search": "^2.13.1",
+    "formdata-node": "^6.0.3",
+    "node-fetch": "^3.3.2",
+    "moment-timezone": "^0.5.48",
     "jimp": "^1.6.0",
-    "qrcode-terminal": "^0.12.0",
-    "chokidar": "^5.0.0",
-    "wa-sticker-formatter": "latest"
+    "chokidar": "^4.0.0",
+    "node-webpmux": "^3.2.1"
   }
 }

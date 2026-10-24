@@ -16,7 +16,6 @@ export default {
         if (quoted?.quotedMessage) {
             target = quoted.quotedMessage;
         }
-
         // Si NO responde → usar ultimo guardado
         else if (lastMedia[jid]) {
             target = lastMedia[jid].message;
@@ -54,10 +53,9 @@ export default {
         return sock.sendMessage(jid, { text: "❌ Ese mensaje no contiene imagen ni video." });
     },
 
-    // --------------- FIX PARA CRASH remoteJid ---------------
-    async onMessage(msg, sock) {
-        if (!msg) return;
-        if (!msg.key) return;
+    // --------------- LISTENER PARA GUARDAR ÚLTIMA MEDIA ---------------
+    async onMessage(sock, msg, ctx) {
+        if (!msg || !msg.key) return;
 
         const jid = msg.key.remoteJid;
         if (!jid) return;

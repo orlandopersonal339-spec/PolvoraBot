@@ -1,6 +1,5 @@
 import axios from "axios";
-import { writeExifImg } from "../lib/fuctions.js"; // ajusta si tu ruta cambia
-import { uploadImage } from "../lib/uploadImage.js";
+import { writeExifImg } from "../lib/fuctions.js";
 
 const colors = {
   rojo: "#FF0000",
@@ -11,19 +10,40 @@ const colors = {
   naranja: "#FFA500",
   celeste: "#00FFFF",
   rosado: "#FFC0CB",
-  negro: "#000000"
+  negro: "#000000",
+  blanco: "#FFFFFF"
 };
+
+const QC_ENDPOINTS = [
+  "https://qc.botcahx.eu.org/generate",
+  "https://bot.lyo.su/quote/generate"
+];
+
+async function requestQuote(payload) {
+  for (const url of QC_ENDPOINTS) {
+    try {
+      const res = await axios.post(url, payload, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 15000
+      });
+      if (res.data?.result?.image) {
+        return res.data.result.image;
+      }
+    } catch {}
+  }
+  throw new Error("No se pudo contactar con el servidor de QC.");
+}
 
 export default {
   commands: ["qc"],
   category: "grupo",
+  description: "Crea un sticker estilo quote de Telegram",
 
   async run(sock, msg, args, ctx) {
     const jid = msg.key.remoteJid;
 
     // ── TEXTO ─────────────────────────
-    const quoted =
-      msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
 
     let text =
       quoted?.conversation ||
@@ -33,7 +53,7 @@ export default {
     if (!text) {
       return sock.sendMessage(
         jid,
-        { text: "✏️ Usa:\n*.qc texto*\n*.qc rojo texto*\nO responde a un mensaje" },
+        { text: `✏️ Usa:\n*${ctx.prefix || "."}qc texto*\n*${ctx.prefix || "."}qc rojo texto*\nO responde a un mensaje con *.qc*` },
         { quoted: msg }
       );
     }
@@ -46,65 +66,58 @@ export default {
       text = args.slice(1).join(" ") || text;
     }
 
-    // ── NOMBRE ────────────────────────
-    const name =
-      msg.pushName ||
-      ctx.sender.split("@")[0];
+    // ── REMITENTE Y AVATAR ────────────
+    const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant;
+    const targetSender = quotedParticipant || ctx.sender;
+    const name = msg.pushName || targetSender.split("@")[0];
 
-    // ── AVATAR (OPCIONAL) ──────────────
-   let avatar = null;
-
-try {
-  const ppUrl = await sock.profilePictureUrl(ctx.sender, "image");
-
-  const res = await axios.get(ppUrl, { responseType: "arraybuffer" });
-  const buffer = Buffer.from(res.data);
-
-  // subir a hosting público
-  avatar = await uploadImage(buffer);
-} catch {
-  avatar = null;
-}
-
-
-    // ── PAYLOAD QC REAL ────────────────
-    const quoteData = {
-      type: "quote",
-      format: "png",
-      backgroundColor: bgColor,
-      width: 600,
-      height: 900,
-      scale: 3,
-      messages: [
-        {
-          avatar: !!avatar,
-          from: {
-            id: 1,
-            name,
-            photo: avatar ? { url: avatar } : undefined
-          },
-          text,
-          replyMessage: {}
-        }
-      ]
-    };
+    let avatarUrl = null;
+    try {
+      avatarUrl = await sock.profilePictureUrl(targetSender, "image");
+    } catch {
+      avatarUrl = null;
+    }
 
     try {
       await sock.sendMessage(jid, {
         react: { text: "🎨", key: msg.key }
       });
 
-      const { data } = await axios.post(
-        "https://bot.lyo.su/quote/generate",
-        quoteData,
-        { headers: { "Content-Type": "application/json" } }
-      );
+      const makePayload = (useAvatar) => ({
+        type: "quote",
+        format: "png",
+        backgroundColor: bgColor,
+        width: 512,
+        height: 768,
+        scale: 2,
+        messages: [
+          {
+            avatar: !!useAvatar,
+            from: {
+              id: 1,
+              name,
+              ...(useAvatar && avatarUrl ? { photo: { url: avatarUrl } } : {})
+            },
+            text,
+            replyMessage: {}
+          }
+        ]
+      });
 
-      const buffer = Buffer.from(
-        data.result.image,
-        "base64"
-      );
+      let imageBase64 = null;
+      try {
+        // Intento 1: con foto de perfil si existe
+        imageBase64 = await requestQuote(makePayload(!!avatarUrl));
+      } catch (err) {
+        // Intento 2: sin foto de perfil (por si el CDN de WhatsApp falló al servidor)
+        if (avatarUrl) {
+          imageBase64 = await requestQuote(makePayload(false));
+        } else {
+          throw err;
+        }
+      }
 
+      const buffer = Buffer.from(imageBase64, "base64");
       const sticker = await writeExifImg(buffer, {
         packname: "ADRIBOT",
         author: "Adri"
