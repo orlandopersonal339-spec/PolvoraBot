@@ -5,11 +5,12 @@ import config from '../config.js';
 
 const OWNER_IDS = [
   '190886046613743@lid',
-  ...(config.owners || []).map(numero =>
-    String(numero).includes('@')
-      ? String(numero)
-      : `${String(numero).replace(/\D/g, '')}@s.whatsapp.net`
-  )
+  ...(config.owners || []).map(id => {
+    const valor = String(id).trim();
+    return valor.includes('@')
+      ? valor
+      : `${valor.replace(/\D/g, '')}@s.whatsapp.net`;
+  })
 ];
 
 const DB_DIR = path.join(process.cwd(), 'data');
@@ -51,38 +52,30 @@ function esPropietario(msg, ctx) {
 }
 
 function obtenerRemitente(msg, ctx) {
-  return obtenerJids(msg, ctx)[0] || '';
+  const ids = obtenerJids(msg, ctx);
+  return ids[0] || '';
 }
 
 function leerDB() {
   fs.mkdirSync(DB_DIR, { recursive: true });
 
   if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(
-      DB_FILE,
-      JSON.stringify({ users: [] }, null, 2)
-    );
+    fs.writeFileSync(DB_FILE, JSON.stringify({ users: [] }, null, 2));
   }
 
   const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-
-  return {
-    users: Array.isArray(db.users) ? db.users : []
-  };
+  return { users: Array.isArray(db.users) ? db.users : [] };
 }
 
 function guardarDB(db) {
   fs.mkdirSync(DB_DIR, { recursive: true });
-
   const temporal = `${DB_FILE}.tmp`;
   fs.writeFileSync(temporal, JSON.stringify(db, null, 2));
   fs.renameSync(temporal, DB_FILE);
 }
 
 function obtenerTexto(msg, args) {
-  if (Array.isArray(args) && args.length) {
-    return args.join(' ');
-  }
+  if (Array.isArray(args) && args.length) return args.join(' ');
 
   return (
     msg?.message?.conversation ||
@@ -106,37 +99,39 @@ function obtenerMenciones(msg) {
     : [];
 }
 
-function obtenerObjetivo(msg, texto, args) {
+function obtenerObjetivo(msg, texto, args = []) {
   const menciones = obtenerMenciones(msg);
   if (menciones.length) return menciones[0];
 
-  const partes = String(texto).trim().split(/\s+/);
+  const partes = [
+    ...String(texto).trim().split(/\s+/),
+    ...args.map(String)
+  ];
 
   const jid = partes.find(p =>
     /@(s\.whatsapp\.net|lid)$/i.test(p)
   );
+
   if (jid) return jid;
 
-  const numero = [...partes, ...(args || [])].find(p =>
-    /^\+?\d{8,15}$/.test(String(p))
-  );
+  const numero = partes.find(p => /^\+?\d{8,15}$/.test(p));
 
-  if (numero) {
-    return String(numero).replace(/\D/g, '') + '@s.whatsapp.net';
-  }
-
-  return '';
+  return numero
+    ? `${numero.replace(/\D/g, '')}@s.whatsapp.net`
+    : '';
 }
 
-function obtenerDuracion(texto, args) {
-  const partes = String(texto).trim().split(/\s+/);
-  const valor = [...partes, ...(args || [])].find(p =>
-    /^\d+[dhm]$/i.test(String(p))
-  );
+function obtenerDuracion(texto, args = []) {
+  const partes = [
+    ...String(texto).trim().split(/\s+/),
+    ...args.map(String)
+  ];
+
+  const valor = partes.find(p => /^\d+[dhm]$/i.test(p));
 
   if (!valor) return 30 * 24 * 60 * 60 * 1000;
 
-  const coincidencia = String(valor).match(/^(\d+)([dhm])$/i);
+  const coincidencia = valor.match(/^(\d+)([dhm])$/i);
   const cantidad = Number(coincidencia[1]);
   const unidad = coincidencia[2].toLowerCase();
 
@@ -153,12 +148,11 @@ function obtenerDuracion(texto, args) {
 
 function obtenerExpiracion(usuario) {
   const valor = usuario?.expiresAt;
-  if (valor == null) return NaN;
 
+  if (valor == null) return NaN;
   if (typeof valor === 'number') return valor;
 
   const texto = String(valor).trim();
-
   if (/^\d+$/.test(texto)) return Number(texto);
 
   return Date.parse(texto);
@@ -192,7 +186,7 @@ export default {
   commands: ['addprem', 'delprem', 'listaprem', 'prem'],
   category: 'premium',
 
-  async run(sock, msg, args, ctx) {
+  async run(sock, msg, args = [], ctx = {}) {
     const chat = msg?.key?.remoteJid;
     if (!chat) return;
 
@@ -214,15 +208,17 @@ export default {
       }
 
       const objetivo = obtenerObjetivo(msg, texto, args);
+
       if (!objetivo) {
         return sock.sendMessage(chat, {
           text:
-            '❌ Menciona al usuario o escribe su número.\n\n' +
-            'Ejemplos:\n.addprem 5212345678901 30d\n.addprem 5212345678901 7d'
+            '❌ Escribe el número o menciona al usuario.\n\n' +
+            'Ejemplo: .addprem 5212345678901 30d'
         }, { quoted: msg });
       }
 
       const duracion = obtenerDuracion(texto, args);
+
       if (!duracion) {
         return sock.sendMessage(chat, {
           text: '❌ Duración no válida. Usa 30d, 12h o 60m.'
@@ -235,14 +231,15 @@ export default {
 
         const jid = normalizarJid(objetivo);
         const existente = buscarPremium(db, jid);
-        const ahora = Date.now();
         const expiracionAnterior = existente
           ? obtenerExpiracion(existente)
-          : ahora;
+          : Date.now();
 
         const base = Math.max(
-          ahora,
-          Number.isFinite(expiracionAnterior) ? expiracionAnterior : ahora
+          Date.now(),
+          Number.isFinite(expiracionAnterior)
+            ? expiracionAnterior
+            : Date.now()
         );
 
         const expiresAt = new Date(base + duracion).toISOString();
@@ -266,7 +263,7 @@ export default {
           text:
             '💎 *PREMIUM ACTIVADO*\n\n' +
             `👤 Usuario: ${jid}\n` +
-            `⏳ Duración: ${Math.floor(duracion / 60000)} minutos\n` +
+            `⏳ Duración agregada: ${Math.floor(duracion / 60000)} minutos\n` +
             `📅 Vence: ${formatoFecha(expiresAt)}`
         }, { quoted: msg });
       });
@@ -280,16 +277,17 @@ export default {
       }
 
       const objetivo = obtenerObjetivo(msg, texto, args);
+
       if (!objetivo) {
         return sock.sendMessage(chat, {
-          text: '❌ Escribe el número o menciona al usuario.'
+          text: '❌ Escribe el número o menciona al usuario.\nEjemplo: .delprem 5212345678901'
         }, { quoted: msg });
       }
 
       return conBloqueo(async () => {
         const db = leerDB();
         const jid = normalizarJid(objetivo);
-        const antes = db.users.length;
+        const cantidadAnterior = db.users.length;
 
         db.users = db.users.filter(
           usuario => normalizarJid(usuario?.jid || '') !== jid
@@ -298,7 +296,7 @@ export default {
         guardarDB(db);
 
         return sock.sendMessage(chat, {
-          text: antes === db.users.length
+          text: cantidadAnterior === db.users.length
             ? '⚠️ Ese usuario no estaba en la lista Premium.'
             : `✅ Se eliminó Premium de ${jid}.`
         }, { quoted: msg });
@@ -336,18 +334,16 @@ export default {
       limpiarExpirados(db);
       guardarDB(db);
 
-      const objetivo = propietario
-        ? (obtenerObjetivo(msg, texto, args) || remitente)
-        : remitente;
-
+      // Si escribes un usuario, consulta ese usuario.
+      // Si no escribes ninguno, consulta al remitente.
+      const objetivo = obtenerObjetivo(msg, texto, args) || remitente;
       const usuario = buscarPremium(db, objetivo);
 
       if (!estaActivo(usuario)) {
         return sock.sendMessage(chat, {
           text:
-            propietario
-              ? '👑 Eres el creador del bot. No necesitas Premium para administrar el bot.'
-              : '❌ *NO TIENES PREMIUM ACTIVO*\n\nContacta al creador del bot para obtener acceso.'
+            '❌ *EL USUARIO NO TIENE PREMIUM ACTIVO*\n\n' +
+            `👤 Usuario: ${objetivo || 'No identificado'}`
         }, { quoted: msg });
       }
 
