@@ -1,136 +1,147 @@
+import fs from "fs";
+import path from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 
-import os from 'os'
-
-function clockString(ms) {
-  const h = Math.floor(ms / 3600000)
-  const m = Math.floor(ms / 60000) % 60
-  const s = Math.floor(ms / 1000) % 60
-  return [h, m, s].map(v => String(v).padStart(2, '0')).join(':')
-}
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default {
-  commands: ['menu', 'help'],
-  category: 'info',
+    commands: ["menu", "help"],
+    admin: false,
+    category: "info",
+    description: "Muestra la lista de comandos disponibles",
 
-  async run(sock, msg, args, ctx) {
-    const jid = ctx?.jid || msg?.key?.remoteJid
-    if (!jid) return
+    async run(sock, msg, args, ctx) {
+        const jid = ctx.jid;
 
-    const userId = msg?.key?.participant || jid
-    const nombre = msg?.pushName || 'Usuario'
-    const prefix = global.prefix || '.'
+        let user = ctx.sender;
+        let username = user.split("@")[0];
 
-    const ahora = new Date()
-    const uptime = clockString(process.uptime() * 1000)
-    const fecha = ahora.toLocaleDateString('es-MX', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    })
-    const dia = ahora.toLocaleDateString('es-MX', {
-      weekday: 'long'
-    })
+        const menuImg = "https://files.catbox.moe/d4d83y.png";
 
-    const storeChats = ctx?.store?.chats || {}
-    const totalChats = Object.keys(storeChats).length
+        // ===============================
+        // LEER TODOS LOS PLUGINS
+        // ===============================
+        const pluginsDir = __dirname;
+        const files = fs.existsSync(pluginsDir)
+            ? fs.readdirSync(pluginsDir).filter(f => f.endsWith(".js"))
+            : [];
 
-    // Obtener los comandos registrados por categoría
-    const plugins = global.plugins || {}
+        let admin = [];
+        let owner = [];
+        let info = [];
+        let grupo = [];
+        let multi = [];
+        let onoff = [];
+        let funny = [];
+        let descargas = [];
+        let tools = [];
+        let ventas = [];
+        let hot = [];
 
-    const admin = []
-    const grupo = []
-    const descargas = []
-    const multi = []
-    const tools = []
-    const funny = []
-    const info = []
-    const onoff = []
-    const owner = []
-    const ventas = []
-    const hot = []
+        for (let file of files) {
+            try {
+                const fileUrl = pathToFileURL(path.join(pluginsDir, file)).href;
+                const module = await import(fileUrl);
+                const plugin = module.default;
+                if (!plugin) continue;
 
-    for (const plugin of Object.values(plugins)) {
-      if (!plugin || !plugin.commands) continue
+                const cmds = plugin.commands || plugin.command || plugin.cmd;
+                const categoria = (plugin.category || "info").toLowerCase();
 
-      const commands = Array.isArray(plugin.commands)
-        ? plugin.commands
-        : [plugin.commands]
+                if (!cmds) continue;
 
-      const category = String(plugin.category || 'info').toLowerCase()
+                const lista = Array.isArray(cmds) ? cmds : [cmds];
 
-      let destino = info
+                switch (categoria) {
+                    case "admin":
+                        admin.push(...lista);
+                        break;
+                    case "owner":
+                        owner.push(...lista);
+                        break;
+                    case "info":
+                        info.push(...lista);
+                        break;
+                    case "grupo":
+                        grupo.push(...lista);
+                        break;
+                    case "multi":
+                        multi.push(...lista);
+                        break;
+                    case "on-off":
+                    case "onoff":
+                    case "on/off":
+                        onoff.push(...lista);
+                        break;
+                    case "funny":
+                    case "fun":
+                        funny.push(...lista);
+                        break;
+                    case "descargas":
+                    case "download":
+                        descargas.push(...lista);
+                        break;
+                    case "tools":
+                    case "herramientas":
+                        tools.push(...lista);
+                        break;
+                    case "ventas":
+                    case "store":
+                        ventas.push(...lista);
+                        break;
+                    case "+18":
+                    case "hot":
+                    case "nsfw":
+                        hot.push(...lista);
+                        break;
+                    default:
+                        info.push(...lista);
+                        break;
+                }
 
-      if (['admin', 'administracion'].includes(category)) destino = admin
-      else if (['group', 'grupo'].includes(category)) destino = grupo
-      else if (['download', 'descargas'].includes(category)) destino = descargas
-      else if (['media', 'multimedia', 'audio', 'image'].includes(category)) destino = multi
-      else if (['tools', 'tool', 'utility', 'herramientas'].includes(category)) destino = tools
-      else if (['fun', 'funny', 'diversion'].includes(category)) destino = funny
-      else if (['onoff', 'switch', 'config'].includes(category)) destino = onoff
-      else if (['owner', 'propietario'].includes(category)) destino = owner
-      else if (['ventas', 'store', 'shop'].includes(category)) destino = ventas
-      else if (['hot', 'nsfw', '+18'].includes(category)) destino = hot
+            } catch (e) {
+                // error silencioso al leer un plugin
+            }
+        }
 
-      destino.push(...commands.map(c => String(c).replace(/^\./, '')))
+        const prefix = ctx.prefix || ".";
+
+        const sections = [
+            admin.length ? `├──「 🛠️ ADMIN 」\n${[...new Set(admin)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+            grupo.length ? `├──「 👥 GRUPO 」\n${[...new Set(grupo)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+            descargas.length ? `├──「 📥 DESCARGAS 」\n${[...new Set(descargas)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+            multi.length ? `├──「 🔀 MULTIMEDIA 」\n${[...new Set(multi)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+            tools.length ? `├──「 🧰 HERRAMIENTAS 」\n${[...new Set(tools)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+            funny.length ? `├──「 😂 FUNNY 」\n${[...new Set(funny)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+            info.length ? `├──「 📘 INFO 」\n${[...new Set(info)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+            onoff.length ? `├──「 🔧 ON / OFF 」\n${[...new Set(onoff)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+            owner.length ? `├──「 👑 OWNER 」\n${[...new Set(owner)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+            ventas.length ? `├──「 🛍️ VENTAS 」\n│ • ${prefix}menustore` : null,
+            hot.length ? `├──「 🔞 +18 」\n${[...new Set(hot)].map(c => `│ • ${prefix}${c}`).join("\n")}` : null,
+        ].filter(Boolean).join("\n\n");
+
+        const texto = `
+╭───「 🤖 SonicBot-ST 」───
+│ 👤 Usuario: @${username}
+│ 📅 Fecha: ${new Date().toLocaleDateString("es-MX")}
+│
+${sections}
+
+╰────────────────────●
+`.trim();
+
+        try {
+            await sock.sendMessage(jid, {
+                image: { url: menuImg },
+                caption: texto,
+                mentions: [user]
+            }, { quoted: msg });
+        } catch (e) {
+            // Si la imagen falla (red o timeout), enviar solo texto
+            await sock.sendMessage(jid, {
+                text: texto,
+                mentions: [user]
+            }, { quoted: msg });
+        }
     }
-
-    const crearCategoria = (titulo, comandos) => {
-      const unicos = [...new Set(comandos)].sort()
-      return unicos.length
-        ? `├──「 ${titulo} 」\n${unicos.map(c => `│ • ${prefix}${c}`).join('\n')}`
-        : null
-    }
-
-    const categorias = [
-      crearCategoria('🛠️ ADMIN', admin),
-      crearCategoria('👥 GRUPO', grupo),
-      crearCategoria('📥 DESCARGAS', descargas),
-      crearCategoria('🔀 MULTIMEDIA', multi),
-      crearCategoria('🧰 HERRAMIENTAS', tools),
-      crearCategoria('😂 FUNNY', funny),
-      crearCategoria('📘 INFO', info),
-      crearCategoria('🔧 ON / OFF', onoff),
-      crearCategoria('👑 OWNER', owner),
-      ventas.length ? `├──「 🛍️ VENTAS 」\n│ • ${prefix}menustore` : null,
-      crearCategoria('🔞 +18', hot)
-    ].filter(Boolean).join('\n')
-
-    const menu = `╭━─━──────━─━╮
-╰╮ » 𝗦𝗼𝗻𝗶𝗰𝗕𝗼𝘁 𝗣𝗿𝗼
-╭━─━──────━─━╯
-┊› ¡𝙂𝙤𝙤𝙙 𝙉𝙞𝙜𝙝𝙩! 🌜☁
-┊› 𝖧𝗈𝗅𝖺 @${userId.split('@')[0]}
-┊› 𝖡𝗈𝗍: SonicBot Pro 🤖
-┊› 𝖨𝖦: instagram.com/orland0157 📸
-┊› 𝖤𝗇𝗏𝗂𝖺 𝗆𝗌𝗃 𝗉𝖺𝗋𝖺 𝖺𝗒𝗎𝖽𝖺
-┊› 𝖢𝗎𝗆𝗉𝗅𝖾 𝗍𝗎𝗌 𝗇𝖾𝖼𝖾𝗌𝗂𝖽𝖺𝖽𝖾𝗌
-┊› 𝖤𝗇 𝗍𝗎𝗌 𝗀𝗋𝗎𝗉𝗈𝗌 𝖽𝖾 𝖶𝖠 🧃
-╰─────────────
-
-╭━─━──────━─━╮
-╰╮ » 𝗥𝗘𝗣𝗢𝗥𝗧𝗔𝗝𝗘 📡
-╭━─━──────━─━╯
-┊» 𝖳𝗂𝖾𝗆𝗉𝗈 𝖺𝖼𝗍𝗂𝗏𝗈: ${uptime}
-┊» 𝖫𝖾𝗇𝗀𝗎𝖺𝗃𝖾: JavaScript
-┊» 𝖧𝗈𝗌𝗍: ${os.hostname()}
-┊» 𝖯𝗅𝖺𝗍𝖺𝖿𝗈𝗋𝗆𝖺: ${os.platform()}
-┊» 𝖳𝗈𝗍𝖺𝗅 𝖽𝖾 𝖼𝗁𝖺𝗍𝗌: ${totalChats}
-┊» 𝖠𝗉𝗈𝖽𝗈: ${nombre}
-┊» 𝖣𝗂𝖺: ${dia}
-┊» 𝖥𝖾𝖼𝗁𝖺: ${fecha}
-╰─────────────
-
-╭━─━──────━─━╮
-╰╮ » 𝗖𝗢𝗠𝗔𝗡𝗗𝗢𝗦 📂
-╭━─━──────━─━╯
-${categorias || '│ • No hay comandos registrados'}
-╰─────────────
-
-ㅤㅤㅤㅤ𝗦𝗼𝗻𝗶𝗰𝗕𝗼𝘁 𝗣𝗿𝗼 🤖`
-
-    await sock.sendMessage(jid, {
-      text: menu,
-      mentions: [userId]
-    }, { quoted: msg })
-  }
-}
+};
