@@ -14,6 +14,10 @@ function conBloqueo(fn) {
   return tarea;
 }
 
+function esperar(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function leerDB() {
   fs.mkdirSync(DB_DIR, { recursive: true });
 
@@ -72,7 +76,6 @@ function obtenerTexto(msg, args) {
   );
 }
 
-// CORREGIDO: acepta JID de teléfono y JID de tipo LID.
 function obtenerChatPrivado(msg, ctx) {
   const candidatos = [
     msg?.key?.participantAlt,
@@ -90,10 +93,9 @@ function obtenerChatPrivado(msg, ctx) {
     const destino = jid.trim();
 
     return (
-      (destino.endsWith('@s.whatsapp.net') ||
-        destino.endsWith('@lid')) &&
-      !destino.endsWith('@g.us')
-    );
+      destino.endsWith('@s.whatsapp.net') ||
+      destino.endsWith('@lid')
+    ) && !destino.endsWith('@g.us');
   }) || '';
 }
 
@@ -114,6 +116,55 @@ function extraerCredenciales(texto) {
   };
 }
 
+// Animación de la barra de progreso en el mismo mensaje.
+async function generarAnimacion(sock, chat, msg) {
+  const frames = [
+    '▱▱▱▱▱▱▱▱▱▱ 0%',
+    '▰▱▱▱▱▱▱▱▱▱ 10%',
+    '▰▰▱▱▱▱▱▱▱▱ 20%',
+    '▰▰▰▱▱▱▱▱▱▱ 30%',
+    '▰▰▰▰▱▱▱▱▱▱ 40%',
+    '▰▰▰▰▰▱▱▱▱▱ 50%',
+    '▰▰▰▰▰▰▱▱▱▱ 60%',
+    '▰▰▰▰▰▰▰▱▱▱ 70%',
+    '▰▰▰▰▰▰▰▰▱▱ 80%',
+    '▰▰▰▰▰▰▰▰▰▱ 90%',
+    '▰▰▰▰▰▰▰▰▰▰ 100%'
+  ];
+
+  let mensaje;
+
+  try {
+    mensaje = await sock.sendMessage(
+      chat,
+      {
+        text:
+          '🚗 *SONICBOT PRO — CAR PARKING*\n\n' +
+          '⚙️ Generando cuenta...\n\n' +
+          frames[0],
+        ...(msg ? { quoted: msg } : {})
+      }
+    );
+
+    for (let i = 1; i < frames.length; i++) {
+      await esperar(350);
+
+      await sock.sendMessage(chat, {
+        text:
+          '🚗 *SONICBOT PRO — CAR PARKING*\n\n' +
+          '⚙️ Generando cuenta...\n\n' +
+          frames[i],
+        edit: mensaje.key
+      });
+    }
+
+    return mensaje;
+  } catch (error) {
+    console.error('Error en la barra de progreso:', error);
+    return mensaje || null;
+  }
+}
+
 export default {
   commands: ['agg', 'cuenta', 'stockcuentas'],
   category: 'carparking',
@@ -132,6 +183,7 @@ export default {
     if (!chat) return;
 
     const esGrupo = chat.endsWith('@g.us');
+
     const remitente =
       msg?.key?.participantAlt ||
       msg?.key?.participant ||
@@ -234,8 +286,6 @@ export default {
           );
         }
 
-        // En privado, el destino es el chat actual.
-        // En grupos, buscamos al participante que pidió la cuenta.
         const privado = esGrupo
           ? obtenerChatPrivado(msg, ctx)
           : chat;
@@ -246,13 +296,27 @@ export default {
             {
               text:
                 '❌ No pude obtener el identificador del solicitante. ' +
-                'Revisa que el cargador del bot conserve msg.key.participant.'
+                'Revisa que el cargador conserve msg.key.participant.'
             },
             { quoted: msg }
           );
         }
 
-        const cuenta = db.disponibles[0];
+        // Mostrar y animar la barra en el chat donde pidieron la cuenta.
+        await generarAnimacion(sock, chat, msg);
+
+        // Leer de nuevo el inventario por seguridad.
+        const inventario = leerDB();
+
+        if (inventario.disponibles.length === 0) {
+          return sock.sendMessage(
+            chat,
+            { text: '❌ No hay cuentas disponibles.' },
+            { quoted: msg }
+          );
+        }
+
+        const cuenta = inventario.disponibles[0];
 
         try {
           await sock.sendMessage(privado, {
@@ -276,15 +340,15 @@ export default {
           );
         }
 
-        // Solo descontar la cuenta después de que el envío se acepte.
-        db.disponibles.shift();
-        db.entregadas.push({
+        inventario.disponibles.shift();
+
+        inventario.entregadas.push({
           ...cuenta,
           entregadaA: remitente,
           entregadaEn: new Date().toISOString()
         });
 
-        guardarDB(db);
+        guardarDB(inventario);
 
         if (esGrupo) {
           await sock.sendMessage(
