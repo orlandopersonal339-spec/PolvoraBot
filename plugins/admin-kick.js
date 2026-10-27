@@ -1,8 +1,9 @@
+
 export default {
-  commands: ["kick", "ban", "expulsar"],
+  commands: ["escupir"],
   category: "admin",
   admin: true,
-  description: "Expulsa uno o varios usuarios (respondiendo o mencionando).",
+  description: "Expulsa usuarios del grupo con un mensaje grosero.",
 
   async run(sock, msg, args, ctx) {
     const jid = msg.key?.remoteJid || ctx.jid;
@@ -10,7 +11,7 @@ export default {
     if (!ctx.isGroup) {
       return sock.sendMessage(
         jid,
-        { text: "❌ Este comando solo funciona en grupos." },
+        { text: "❌ Este comando solo funciona en grupos, genio." },
         { quoted: msg }
       );
     }
@@ -27,11 +28,15 @@ export default {
 
         canKick = fresh?.participants?.some(p => {
           const pid = p.id?.replace(/\D/g, "");
-          const isAdm = p.admin === "admin" || p.admin === "superadmin";
+          const isAdm =
+            p.admin === "admin" ||
+            p.admin === "superadmin";
+
           return isAdm && botDigits.includes(pid);
         }) || false;
 
         const ownerDigits = fresh?.owner?.replace(/\D/g, "");
+
         if (!canKick && ownerDigits && botDigits.includes(ownerDigits)) {
           canKick = true;
         }
@@ -41,7 +46,9 @@ export default {
     if (!canKick) {
       return sock.sendMessage(
         jid,
-        { text: "❌ El bot necesita ser administrador del grupo para expulsar usuarios." },
+        {
+          text: "❌ No puedo expulsar a nadie si no soy admin, animal. 💀"
+        },
         { quoted: msg }
       );
     }
@@ -49,27 +56,32 @@ export default {
     const m = msg.message || {};
     let targets = [];
 
-    // 1️⃣ Si responde a un mensaje
-    const replied = m?.extendedTextMessage?.contextInfo?.participant;
+    // Usuario al que respondes
+    const replied =
+      m?.extendedTextMessage?.contextInfo?.participant;
+
     if (replied) targets.push(replied);
 
-    // 2️⃣ Si menciona con @
-    const mentioned = m?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    // Usuarios mencionados
+    const mentioned =
+      m?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+
     if (mentioned.length) targets.push(...mentioned);
 
-    // ❌ Si no hay usuarios
     if (targets.length === 0) {
       return sock.sendMessage(
         jid,
-        { text: "❌ Responde a un mensaje o menciona uno o varios usuarios (@usuario)." },
+        {
+          text: "💀 Usa .escupir @usuario o responde a su mensaje, no seas inútil."
+        },
         { quoted: msg }
       );
     }
 
-    // 🔁 Eliminar duplicados
+    // Eliminar duplicados
     targets = [...new Set(targets)];
 
-    // 🚫 Evitar auto-kick del bot
+    // Evitar expulsar al propio bot
     const botIdentifiers = [
       sock.user?.id?.replace(/\D/g, ""),
       sock.user?.lid?.replace(/\D/g, "")
@@ -83,24 +95,37 @@ export default {
     if (targets.length === 0) {
       return sock.sendMessage(
         jid,
-        { text: "❌ No puedo expulsarme a mí mismo." },
+        { text: "🤡 ¿Expulsarme a mí mismo? Ni que estuviera pendejo." },
         { quoted: msg }
       );
     }
 
     try {
-      await sock.groupParticipantsUpdate(jid, targets, "remove");
+      await sock.groupParticipantsUpdate(
+        jid,
+        targets,
+        "remove"
+      );
 
       await sock.sendMessage(
         jid,
-        { text: `🦶 Usuarios expulsados: ${targets.length}` },
+        {
+          text:
+            `🤮 @${targets.map(u => u.split("@")[0]).join(", @")}\n\n` +
+            `💦 ¡Fuera de aquí, pinche estorbo! ` +
+            `Te escupo y te vas directo a la calle. 🦶💀`,
+          mentions: targets
+        },
         { quoted: msg }
       );
     } catch (e) {
-      console.error("❌ Error kick:", e);
+      console.error("❌ Error escupir:", e);
+
       await sock.sendMessage(
         jid,
-        { text: "❌ No pude expulsar a uno o más usuarios (¿faltan permisos de admin?)." },
+        {
+          text: "❌ No pude expulsar al usuario. Revisa mis permisos de administrador."
+        },
         { quoted: msg }
       );
     }
