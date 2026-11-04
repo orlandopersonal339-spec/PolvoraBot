@@ -1,261 +1,264 @@
 
-import fs from 'fs/promises'
-import path from 'path'
-import { fileURLToPath, pathToFileURL } from 'url'
+import fs from "fs";
+import path from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
-const PLUGIN_DIR = path.join(__dirname, 'plugins').endsWith('plugins/plugins')
-  ? path.join(__dirname, 'plugins')
-  : __dirname
-
-const CATEGORIAS = {
-  admin: '🛡️ ADMINISTRACIÓN',
-  grupo: '👥 GRUPOS',
-  group: '👥 GRUPOS',
-  descargas: '📥 DESCARGAS',
-  downloads: '📥 DESCARGAS',
-  multi: '🎨 MULTIMEDIA',
-  multimedia: '🎨 MULTIMEDIA',
-  tools: '🧰 HERRAMIENTAS',
-  herramientas: '🧰 HERRAMIENTAS',
-  funny: '🎮 ENTRETENIMIENTO',
-  info: '📚 INFORMACIÓN',
-  onoff: '⚙️ CONFIGURACIÓN',
-  owner: '👑 OWNER',
-  ventas: '💰 VENTAS',
-  hot: '🔞 +18',
-  premium: '💎 PREMIUM'
-}
-
-const ORDEN = [
-  'admin',
-  'grupo',
-  'descargas',
-  'multi',
-  'tools',
-  'funny',
-  'info',
-  'onoff',
-  'owner',
-  'ventas',
-  'premium',
-  'hot'
-]
-
-function normalizarComandos(plugin) {
-  let comandos = []
-
-  if (Array.isArray(plugin.commands)) {
-    comandos.push(...plugin.commands)
-  }
-
-  if (typeof plugin.command === 'string') {
-    comandos.push(plugin.command)
-  } else if (Array.isArray(plugin.command)) {
-    comandos.push(...plugin.command)
-  }
-
-  if (typeof plugin.cmd === 'string') {
-    comandos.push(plugin.cmd)
-  } else if (Array.isArray(plugin.cmd)) {
-    comandos.push(...plugin.cmd)
-  }
-
-  if (Array.isArray(plugin.aliases)) {
-    comandos.push(...plugin.aliases)
-  }
-
-  return [...new Set(
-    comandos
-      .filter(c => typeof c === 'string' && c.trim())
-      .map(c => c.trim().replace(/^[.!/#]+/, '').toLowerCase())
-  )]
-}
-
-function normalizarCategoria(categoria) {
-  const cat = String(categoria || 'info')
-    .toLowerCase()
-    .trim()
-
-  const equivalencias = {
-    group: 'grupo',
-    downloads: 'descargas',
-    multimedia: 'multi',
-    herramientas: 'tools',
-    entretenimiento: 'funny',
-    configuracion: 'onoff',
-    premium: 'premium'
-  }
-
-  return equivalencias[cat] || cat
-}
-
-async function buscarPlugins(directorio) {
-  let archivos = []
-
-  try {
-    const elementos = await fs.readdir(directorio, {
-      withFileTypes: true
-    })
-
-    for (const elemento of elementos) {
-      const ruta = path.join(directorio, elemento.name)
-
-      if (elemento.isDirectory()) {
-        if (
-          elemento.name === 'node_modules' ||
-          elemento.name.startsWith('.')
-        ) continue
-
-        archivos.push(...await buscarPlugins(ruta))
-      } else if (
-        elemento.isFile() &&
-        elemento.name.endsWith('.js') &&
-        elemento.name !== 'menu.js'
-      ) {
-        archivos.push(ruta)
-      }
-    }
-  } catch (error) {
-    console.error('Error leyendo plugins:', error)
-  }
-
-  return archivos
-}
-
-async function cargarComandos() {
-  const categorias = {}
-
-  for (const categoria of ORDEN) {
-    categorias[categoria] = new Set()
-  }
-
-  const archivos = await buscarPlugins(PLUGIN_DIR)
-
-  for (const archivo of archivos) {
-    try {
-      const stats = await fs.stat(archivo)
-
-      const url = pathToFileURL(archivo).href +
-        `?v=${stats.mtimeMs}`
-
-      const modulo = await import(url)
-      const plugin = modulo.default || modulo
-
-      if (!plugin || typeof plugin !== 'object') continue
-
-      const comandos = normalizarComandos(plugin)
-
-      if (!comandos.length) continue
-
-      let categoria = normalizarCategoria(plugin.category)
-
-      if (!categorias[categoria]) {
-        categoria = 'info'
-      }
-
-      for (const comando of comandos) {
-        categorias[categoria].add(comando)
-      }
-
-    } catch (error) {
-      console.error(
-        `Error cargando plugin ${path.basename(archivo)}:`,
-        error.message
-      )
-    }
-  }
-
-  return categorias
-}
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default {
-  commands: ['menu', 'help'],
-  category: 'info',
+    commands: ["menu", "help"],
+    admin: false,
+    category: "info",
+    description: "Muestra el menú de SonicBot Pro",
 
-  async run(sock, msg, args, ctx) {
-    const jid = ctx?.jid || msg?.key?.remoteJid
-    if (!jid) return
+    async run(sock, msg, args, ctx) {
+        const jid = ctx?.jid || msg?.key?.remoteJid;
+        if (!jid) return;
 
-    try {
-      const categorias = await cargarComandos()
+        const user = ctx?.sender || msg?.key?.participant || "";
+        const username = user.split("@")[0] || "Usuario";
 
-      let total = 0
-      let contenido = ''
+        const menuImg = "https://files.catbox.moe/d4d83y.png";
+        const prefix = ctx?.prefix || ".";
 
-      for (const categoria of ORDEN) {
-        const comandos = [...categorias[categoria]]
+        // ===============================
+        // LEER TODOS LOS PLUGINS
+        // ===============================
 
-        if (!comandos.length) continue
+        const pluginsDir = __dirname;
 
-        total += comandos.length
+        const files = fs.existsSync(pluginsDir)
+            ? fs.readdirSync(pluginsDir).filter(f =>
+                f.endsWith(".js") && f !== path.basename(fileURLToPath(import.meta.url))
+            )
+            : [];
 
-        const titulo = CATEGORIAS[categoria]
+        const categorias = {
+            admin: new Set(),
+            owner: new Set(),
+            info: new Set(),
+            grupo: new Set(),
+            multi: new Set(),
+            onoff: new Set(),
+            funny: new Set(),
+            descargas: new Set(),
+            tools: new Set(),
+            ventas: new Set(),
+            hot: new Set(),
+            premium: new Set()
+        };
 
-        const lista = comandos
-          .sort()
-          .map(comando => `  › .${comando}`)
-          .join('\n')
+        for (const file of files) {
+            try {
+                const ruta = path.join(pluginsDir, file);
+                const fileUrl = pathToFileURL(ruta).href;
 
-        contenido += `\n╭━━〔 ${titulo} 〕\n`
-        contenido += `${lista}\n`
-        contenido += `╰━━━━━━━━━━━━━━\n`
-      }
+                const modulo = await import(fileUrl);
+                const plugin = modulo.default;
 
-      if (total === 0) {
-        return sock.sendMessage(
-          jid,
-          {
-            text: '❌ No se encontraron comandos registrados en la carpeta plugins.'
-          },
-          { quoted: msg }
-        )
-      }
+                if (!plugin) continue;
 
-      const texto = `╭━━━〔 🤖 〕━━━╮
-     𝗦𝗢𝗡𝗜𝗖𝗕𝗢𝗧 𝗣𝗥𝗢
+                const cmds =
+                    plugin.commands ||
+                    plugin.command ||
+                    plugin.cmd;
+
+                if (!cmds) continue;
+
+                const lista = Array.isArray(cmds)
+                    ? cmds
+                    : [cmds];
+
+                const categoria = String(
+                    plugin.category || "info"
+                ).toLowerCase().trim();
+
+                let destino = "info";
+
+                switch (categoria) {
+                    case "admin":
+                        destino = "admin";
+                        break;
+
+                    case "owner":
+                        destino = "owner";
+                        break;
+
+                    case "info":
+                        destino = "info";
+                        break;
+
+                    case "grupo":
+                    case "group":
+                        destino = "grupo";
+                        break;
+
+                    case "multi":
+                    case "multimedia":
+                        destino = "multi";
+                        break;
+
+                    case "on-off":
+                    case "onoff":
+                    case "on/off":
+                        destino = "onoff";
+                        break;
+
+                    case "funny":
+                    case "fun":
+                        destino = "funny";
+                        break;
+
+                    case "descargas":
+                    case "download":
+                    case "downloads":
+                        destino = "descargas";
+                        break;
+
+                    case "tools":
+                    case "herramientas":
+                        destino = "tools";
+                        break;
+
+                    case "ventas":
+                    case "store":
+                        destino = "ventas";
+                        break;
+
+                    case "+18":
+                    case "hot":
+                    case "nsfw":
+                        destino = "hot";
+                        break;
+
+                    case "premium":
+                        destino = "premium";
+                        break;
+                }
+
+                for (const comando of lista) {
+                    if (
+                        typeof comando === "string" &&
+                        comando.trim()
+                    ) {
+                        categorias[destino].add(
+                            comando.trim().replace(/^[.!/#]+/, "")
+                        );
+                    }
+                }
+
+            } catch (e) {
+                console.error(
+                    `Error leyendo ${file}:`,
+                    e.message
+                );
+            }
+        }
+
+        // ===============================
+        // CONSTRUIR SECCIONES
+        // ===============================
+
+        const orden = [
+            ["admin", "🛡️ ADMINISTRACIÓN"],
+            ["grupo", "👥 GRUPOS"],
+            ["descargas", "📥 DESCARGAS"],
+            ["multi", "🎨 MULTIMEDIA"],
+            ["tools", "🧰 HERRAMIENTAS"],
+            ["funny", "🎮 ENTRETENIMIENTO"],
+            ["info", "📚 INFORMACIÓN"],
+            ["onoff", "⚙️ ON / OFF"],
+            ["ventas", "💰 VENTAS"],
+            ["premium", "💎 PREMIUM"],
+            ["owner", "👑 OWNER"],
+            ["hot", "🔞 +18"]
+        ];
+
+        let total = 0;
+        let secciones = [];
+
+        for (const [key, titulo] of orden) {
+            const comandos = [...categorias[key]]
+                .sort((a, b) => a.localeCompare(b));
+
+            if (!comandos.length) continue;
+
+            total += comandos.length;
+
+            const lista = comandos
+                .map(c => `│  › ${prefix}${c}`)
+                .join("\n");
+
+            secciones.push(
+                `╭━━〔 ${titulo} 〕\n${lista}\n╰━━━━━━━━━━━━━━`
+            );
+        }
+
+        if (total === 0) {
+            return sock.sendMessage(jid, {
+                text: "❌ No hay comandos registrados."
+            }, { quoted: msg });
+        }
+
+        // ===============================
+        // MENÚ SONICBOT PRO
+        // ===============================
+
+        const fecha = new Date().toLocaleDateString("es-MX", {
+            day: "2-digit",
+            month: "long",
+            year: "numeric"
+        });
+
+        const texto = `╭━━━〔 🤖 〕━━━╮
+   𝗦𝗢𝗡𝗜𝗖𝗕𝗢𝗧 𝗣𝗥𝗢
 ╰━━━━━━━━━━━━━━╯
 
 🌙 ¡GOOD NIGHT! ☁️
 
-👋 Hola @Orlando157
+👋 Hola @${username}
 
 ╭━━〔 📌 INFORMACIÓN 〕
 │
 │ 🤖 Bot: SonicBot Pro
-│ ⚡ Estado: Funcionando
+│ 👤 Usuario: ${username}
+│ 📅 Fecha: ${fecha}
+│ ⚡ Estado: Online
 │ 📚 Comandos: ${total}
-│ 📂 Categorías: ${ORDEN.filter(c => categorias[c].size > 0).length}
-│ 🔹 Prefijo: .
+│ 📂 Categorías: ${secciones.length}
+│ 🔹 Prefijo: ${prefix}
 │
 ╰━━━━━━━━━━━━━━
 
-${contenido}
+${secciones.join("\n\n")}
+
 ╭━━〔 📸 REDES 〕
 │ Instagram:
 │ instagram.com/orland0157
 │
-│ 💬 Envía un mensaje para ayuda
+│ 💬 Envía un mensaje para recibir ayuda
 ╰━━━━━━━━━━━━━━
 
-       𝗦𝗢𝗡𝗜𝗖𝗕𝗢𝗧 𝗣𝗥𝗢 🤖`
+     𝗦𝗢𝗡𝗜𝗖𝗕𝗢𝗧 𝗣𝗥𝗢 🤖`;
 
-      await sock.sendMessage(
-        jid,
-        { text: texto },
-        { quoted: msg }
-      )
+        // ===============================
+        // ENVIAR MENÚ CON IMAGEN
+        // ===============================
 
-    } catch (error) {
-      console.error('Error en menú:', error)
+        try {
+            await sock.sendMessage(jid, {
+                image: { url: menuImg },
+                caption: texto,
+                mentions: user ? [user] : []
+            }, { quoted: msg });
 
-      await sock.sendMessage(
-        jid,
-        { text: '❌ Ocurrió un error al generar el menú.' },
-        { quoted: msg }
-      )
+        } catch (error) {
+            console.error("Error enviando imagen:", error);
+
+            await sock.sendMessage(jid, {
+                text: texto,
+                mentions: user ? [user] : []
+            }, { quoted: msg });
+        }
     }
-  }
-}
+};
