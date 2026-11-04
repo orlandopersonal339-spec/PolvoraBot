@@ -21,54 +21,73 @@ export default {
       if (!participants.length) {
         return sock.sendMessage(
           jid,
-          { text: '❌ No se encontraron integrantes del grupo.' },
+          { text: '❌ No se encontraron integrantes.' },
           { quoted: msg }
         )
       }
 
-      const mentions = participants.map(p => p.id)
-
       const info = args.join(' ') || 'Sin información'
 
-      // Obtener bandera según prefijo telefónico
-      function obtenerBandera(id) {
-        const numero = id
-          .split('@')[0]
-          .replace(/\D/g, '')
+      const paises = [
+        ['593', '🇪🇨'],
+        ['591', '🇧🇴'],
+        ['595', '🇵🇾'],
+        ['598', '🇺🇾'],
+        ['507', '🇵🇦'],
+        ['506', '🇨🇷'],
+        ['502', '🇬🇹'],
+        ['503', '🇸🇻'],
+        ['504', '🇭🇳'],
+        ['505', '🇳🇮'],
+        ['509', '🇭🇹'],
+        ['57', '🇨🇴'],
+        ['52', '🇲🇽'],
+        ['54', '🇦🇷'],
+        ['56', '🇨🇱'],
+        ['51', '🇵🇪'],
+        ['58', '🇻🇪'],
+        ['53', '🇨🇺'],
+        ['55', '🇧🇷'],
+        ['34', '🇪🇸'],
+        ['44', '🇬🇧'],
+        ['33', '🇫🇷'],
+        ['49', '🇩🇪'],
+        ['39', '🇮🇹'],
+        ['81', '🇯🇵'],
+        ['86', '🇨🇳'],
+        ['91', '🇮🇳'],
+        ['61', '🇦🇺'],
+        ['27', '🇿🇦'],
+        ['1', '🇺🇸']
+      ]
 
-        const paises = [
-          ['593', '🇪🇨'],
-          ['591', '🇧🇴'],
-          ['595', '🇵🇾'],
-          ['598', '🇺🇾'],
-          ['507', '🇵🇦'],
-          ['506', '🇨🇷'],
-          ['502', '🇬🇹'],
-          ['503', '🇸🇻'],
-          ['504', '🇭🇳'],
-          ['505', '🇳🇮'],
-          ['509', '🇭🇹'],
-          ['57', '🇨🇴'],
-          ['52', '🇲🇽'],
-          ['54', '🇦🇷'],
-          ['56', '🇨🇱'],
-          ['51', '🇵🇪'],
-          ['58', '🇻🇪'],
-          ['53', '🇨🇺'],
-          ['55', '🇧🇷'],
-          ['34', '🇪🇸'],
-          ['44', '🇬🇧'],
-          ['33', '🇫🇷'],
-          ['49', '🇩🇪'],
-          ['39', '🇮🇹'],
-          ['81', '🇯🇵'],
-          ['86', '🇨🇳'],
-          ['91', '🇮🇳'],
-          ['61', '🇦🇺'],
-          ['27', '🇿🇦'],
-          ['7', '🇷🇺'],
-          ['1', '🇺🇸']
+      function obtenerNumero(participant) {
+        const candidatos = [
+          participant.phoneNumber,
+          participant.id,
+          participant.jid,
+          participant.lid
         ]
+
+        for (const candidato of candidatos) {
+          if (!candidato) continue
+
+          const valor = String(candidato)
+
+          if (valor.includes('@s.whatsapp.net')) {
+            return valor.split('@')[0].replace(/\D/g, '')
+          }
+
+          if (!valor.includes('@') && /^\d+$/.test(valor)) {
+            return valor
+          }
+        }
+
+        return null
+      }
+
+      function obtenerBandera(numero) {
+        if (!numero) return '🌍'
 
         const pais = paises.find(([codigo]) =>
           numero.startsWith(codigo)
@@ -77,11 +96,14 @@ export default {
         return pais ? pais[1] : '🌍'
       }
 
-      const miembros = participants.map(p => {
-        const id = p.id
-        const numero = id.split('@')[0]
+      const mentions = participants.map(p => p.id)
 
-        return `┊» ${obtenerBandera(id)} @${numero}`
+      const miembros = participants.map(p => {
+        const numero = obtenerNumero(p)
+        const id = p.id
+        const bandera = obtenerBandera(numero)
+
+        return `┊» ${bandera} @${id.split('@')[0]}`
       }).join('\n')
 
       const texto = `！ 𝗠𝗘𝗡𝗖𝗜𝗢𝗡 𝗚𝗘𝗡𝗘𝗥𝗔𝗟 ！
@@ -96,15 +118,12 @@ ${miembros}
 
       await sock.sendMessage(
         jid,
-        {
-          text: texto,
-          mentions
-        },
+        { text: texto, mentions },
         { quoted: msg }
       )
 
     } catch (error) {
-      console.error('Error en comando todos:', error)
+      console.error('Error en todos:', error)
 
       await sock.sendMessage(
         jid,
