@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const DEVELOPER_JID = '521XXXXXXXXXX@s.whatsapp.net';
+const DEVELOPER_JID = '190886046613743@lid';
 
 const DATA_DIR = './data';
 const COUNTER_FILE = path.join(DATA_DIR, 'reportes-counter.json');
@@ -55,16 +55,9 @@ export default {
       }, { quoted: msg });
     }
 
-    if (DEVELOPER_JID.includes('XXXXXXXXXX')) {
-      return sock.sendMessage(jid, {
-        text: '❌ El sistema de reportes aún no está configurado.'
-      }, { quoted: msg });
-    }
-
     try {
       const numeroReporte = obtenerNumeroReporte();
 
-      // Aviso que recibe el dueño del bot
       const mensaje = `🚨 *NUEVO REPORTE — SONICBOT PRO*
 
 🔢 *Reporte:* #${numeroReporte}`;
@@ -73,7 +66,6 @@ export default {
         text: mensaje
       });
 
-      // Confirmación que recibe quien envió el reporte
       await sock.sendMessage(jid, {
         text: `➤ *HECHO* ✅
 
