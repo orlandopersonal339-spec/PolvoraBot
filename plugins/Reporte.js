@@ -17,8 +17,8 @@ function obtenerNumeroReporte() {
     try {
       const data = JSON.parse(fs.readFileSync(COUNTER_FILE, 'utf8'));
       numero = Number(data.numero) || 0;
-    } catch {
-      numero = 0;
+    } catch (error) {
+      console.error('Error leyendo contador:', error);
     }
   }
 
@@ -41,6 +41,11 @@ export default {
     const jid = msg.key?.remoteJid || ctx.jid;
     const reporte = args.join(' ').trim();
 
+    const contextInfo =
+      msg.message?.extendedTextMessage?.contextInfo;
+
+    const quoted = contextInfo?.quotedMessage;
+
     if (!reporte) {
       return sock.sendMessage(jid, {
         text: `➤ *INSTRUCCIONES* ❗
@@ -58,14 +63,30 @@ export default {
     try {
       const numeroReporte = obtenerNumeroReporte();
 
-      const mensaje = `🚨 *NUEVO REPORTE — SONICBOT PRO*
+      let mensajeCitado = '';
 
-🔢 *Reporte:* #${numeroReporte}`;
+      if (quoted) {
+        const texto =
+          quoted.conversation ||
+          quoted.extendedTextMessage?.text ||
+          '[Mensaje multimedia]';
+
+        mensajeCitado = `\n\n📩 *MENSAJE REPORTADO:*\n${texto}`;
+      }
+
+      // Mensaje completo que recibe el dueño
+      const mensaje = `🚨 *NUEVO REPORTE*
+
+🔢 *Reporte:* #${numeroReporte}
+
+📝 *REPORTE DEL USUARIO:*
+${reporte}${mensajeCitado}`;
 
       await sock.sendMessage(DEVELOPER_JID, {
         text: mensaje
       });
 
+      // Confirmación para quien envió el reporte
       await sock.sendMessage(jid, {
         text: `➤ *HECHO* ✅
 
