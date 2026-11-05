@@ -1,3 +1,4 @@
+
 import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
@@ -233,6 +234,7 @@ ${saludo}
 │ 👤 Usuario: @${username}
 │ ⚡ Estado: Online
 │ 📸 IG: instagram.com/orland0157
+│ 👑 Creador: @${username}
 │ 📂 Categorías: ${secciones.length}
 │ 🔹 Prefijo: ${prefix}
 │
