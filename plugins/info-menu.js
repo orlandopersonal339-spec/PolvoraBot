@@ -1,8 +1,13 @@
+
 import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// DATOS DEL CREADOR
+const CREATOR_JID = "190886046613743@lid";
+const CREATOR_NAME = "Orlando157";
 
 export default {
     commands: ["menu", "help"],
@@ -14,7 +19,11 @@ export default {
         const jid = ctx?.jid || msg?.key?.remoteJid;
         if (!jid) return;
 
-        const user = ctx?.sender || msg?.key?.participant || "";
+        const user =
+            ctx?.sender ||
+            msg?.key?.participant ||
+            "";
+
         const username = user.split("@")[0] || "Usuario";
 
         const menuImg = "https://files.catbox.moe/d4d83y.png";
@@ -40,6 +49,53 @@ export default {
             saludo = "☀️ ¡BUENAS TARDES!";
         } else {
             saludo = "🌙 ¡BUENAS NOCHES!";
+        }
+
+        // ===============================
+        // DETECTAR AL CREADOR
+        // ===============================
+
+        let creadorPresente = false;
+        let creadorMencion = null;
+
+        if (jid.endsWith("@g.us")) {
+            try {
+                const metadata = await sock.groupMetadata(jid);
+                const participantes = metadata.participants || [];
+
+                const normalizar = id =>
+                    String(id || "")
+                        .split(":")[0]
+                        .toLowerCase();
+
+                const creador = participantes.find(p => {
+                    const identificadores = [
+                        p.id,
+                        p.jid,
+                        p.lid,
+                        p.phoneNumber
+                    ].filter(Boolean);
+
+                    return identificadores.some(id =>
+                        normalizar(id) === normalizar(CREATOR_JID)
+                    );
+                });
+
+                if (creador) {
+                    creadorPresente = true;
+
+                    creadorMencion =
+                        creador.id ||
+                        creador.lid ||
+                        CREATOR_JID;
+                }
+
+            } catch (error) {
+                console.error(
+                    "Error verificando al creador:",
+                    error.message
+                );
+            }
         }
 
         // ===============================
@@ -196,7 +252,6 @@ export default {
             ["hot", "🔞 +18"]
         ];
 
-        let total = 0;
         let secciones = [];
 
         for (const [key, titulo] of orden) {
@@ -204,8 +259,6 @@ export default {
                 .sort((a, b) => a.localeCompare(b));
 
             if (!comandos.length) continue;
-
-            total += comandos.length;
 
             const lista = comandos
                 .map(c => `│  › ${prefix}${c}`)
@@ -215,6 +268,14 @@ export default {
                 `╭━━〔 ${titulo} 〕\n${lista}\n╰━━━━━━━━━━━━━━`
             );
         }
+
+        // ===============================
+        // INFORMACIÓN DEL CREADOR
+        // ===============================
+
+        const creadorTexto = creadorPresente
+            ? `@${String(creadorMencion).split("@")[0]}`
+            : CREATOR_NAME;
 
         // ===============================
         // MENÚ SONICBOT PRO
@@ -233,7 +294,7 @@ ${saludo}
 │ 👤 Usuario: @${username}
 │ ⚡ Estado: Online
 │ 📸 IG: instagram.com/orland0157
-│ 👑 Creador: @${username}
+│ 👑 Creador: ${creadorTexto}
 │ 📂 Categorías: ${secciones.length}
 │ 🔹 Prefijo: ${prefix}
 │
@@ -251,6 +312,22 @@ ${secciones.join("\n\n")}
      𝗦𝗢𝗡𝗜𝗖𝗕𝗢𝗧 𝗣𝗥𝗢 🤖`;
 
         // ===============================
+        // PREPARAR MENCIONES
+        // ===============================
+
+        const menciones = [];
+
+        if (user) {
+            menciones.push(user);
+        }
+
+        if (creadorPresente && creadorMencion) {
+            if (!menciones.includes(creadorMencion)) {
+                menciones.push(creadorMencion);
+            }
+        }
+
+        // ===============================
         // ENVIAR MENÚ CON IMAGEN
         // ===============================
 
@@ -258,7 +335,7 @@ ${secciones.join("\n\n")}
             await sock.sendMessage(jid, {
                 image: { url: menuImg },
                 caption: texto,
-                mentions: user ? [user] : []
+                mentions: menciones
             }, { quoted: msg });
 
         } catch (error) {
@@ -266,7 +343,7 @@ ${secciones.join("\n\n")}
 
             await sock.sendMessage(jid, {
                 text: texto,
-                mentions: user ? [user] : []
+                mentions: menciones
             }, { quoted: msg });
         }
     }
