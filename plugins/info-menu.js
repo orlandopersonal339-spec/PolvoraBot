@@ -1,4 +1,3 @@
-
 import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
@@ -22,6 +21,28 @@ export default {
         const prefix = ctx?.prefix || ".";
 
         // ===============================
+        // SALUDO AUTOMÁTICO MÉXICO
+        // ===============================
+
+        const hora = Number(
+            new Date().toLocaleString("es-MX", {
+                timeZone: "America/Mexico_City",
+                hour: "2-digit",
+                hour12: false
+            })
+        );
+
+        let saludo;
+
+        if (hora >= 5 && hora < 12) {
+            saludo = "🌅 ¡BUENOS DÍAS!";
+        } else if (hora >= 12 && hora < 19) {
+            saludo = "☀️ ¡BUENAS TARDES!";
+        } else {
+            saludo = "🌙 ¡BUENAS NOCHES!";
+        }
+
+        // ===============================
         // LEER TODOS LOS PLUGINS
         // ===============================
 
@@ -29,7 +50,8 @@ export default {
 
         const files = fs.existsSync(pluginsDir)
             ? fs.readdirSync(pluginsDir).filter(f =>
-                f.endsWith(".js") && f !== path.basename(fileURLToPath(import.meta.url))
+                f.endsWith(".js") &&
+                f !== path.basename(fileURLToPath(import.meta.url))
             )
             : [];
 
@@ -194,37 +216,23 @@ export default {
             );
         }
 
-        if (total === 0) {
-            return sock.sendMessage(jid, {
-                text: "❌ No hay comandos registrados."
-            }, { quoted: msg });
-        }
-
         // ===============================
         // MENÚ SONICBOT PRO
         // ===============================
-
-        const fecha = new Date().toLocaleDateString("es-MX", {
-            day: "2-digit",
-            month: "long",
-            year: "numeric"
-        });
 
         const texto = `╭━━━〔 🤖 〕━━━╮
    𝗦𝗢𝗡𝗜𝗖𝗕𝗢𝗧 𝗣𝗥𝗢
 ╰━━━━━━━━━━━━━━╯
 
-🌙 ¡GOOD NIGHT! ☁️
+${saludo}
 
 👋 Hola @${username}
 
 ╭━━〔 📌 INFORMACIÓN 〕
 │
-│ 🤖 Bot: SonicBot Pro
-│ 👤 Usuario: ${username}
-│ 📅 Fecha: ${fecha}
+│ 👤 Usuario: @${username}
 │ ⚡ Estado: Online
-│ 📚 Comandos: ${total}
+│ 📸 IG: instagram.com/orland0157
 │ 📂 Categorías: ${secciones.length}
 │ 🔹 Prefijo: ${prefix}
 │
